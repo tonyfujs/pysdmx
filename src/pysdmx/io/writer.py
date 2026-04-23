@@ -9,6 +9,7 @@ from pysdmx.errors import Invalid
 from pysdmx.io.format import Format
 from pysdmx.model import MetadataReport
 from pysdmx.model.__base import MaintainableArtefact
+from pysdmx.model._validation import ValidationError, validate_many
 from pysdmx.model.dataset import Dataset
 
 WRITERS = {
@@ -105,12 +106,19 @@ def write_sdmx(
         partial_keys: Whether to write partial key rows for
           series-level and group-level attributes
           (only for SDMX-CSV 2.0 and 2.1 formats).
+        validate: When ``True`` and writing a structure format, run
+          :func:`pysdmx.model.validate_many` on the artefacts and raise
+          :class:`pysdmx.model.ValidationError` if any publish-readiness
+          issue is found. Defaults to ``False`` for backward
+          compatibility.
 
     Returns:
         A serialised string if output_path is an empty string, otherwise None.
 
     Raises:
         Invalid: If the file is empty or the format is not supported.
+        ValidationError: If ``validate=True`` and one or more structure
+            artefacts fail publish-readiness checks.
     """
     if sdmx_format not in WRITERS:
         raise Invalid(
@@ -121,9 +129,6 @@ def write_sdmx(
     sdmx_objects = (
         sdmx_objects if isinstance(sdmx_objects, Sequence) else [sdmx_objects]
     )
-
-    module = __import__(WRITERS[sdmx_format], fromlist=["write"])
-    writer = module.write
 
     is_structure = sdmx_format in STRUCTURE_WRITERS
     is_ref_meta = sdmx_format in REFMETA_WRITERS
@@ -156,6 +161,14 @@ def write_sdmx(
         and not all(isinstance(x, Dataset) for x in value)
     ):
         raise Invalid("Only Datasets can be written to data formats.")
+
+    if is_structure and kwargs.get("validate", False):
+        issues = validate_many(value)
+        if issues:
+            raise ValidationError(issues)
+
+    module = __import__(WRITERS[sdmx_format], fromlist=["write"])
+    writer = module.write
 
     args = {
         key: value,
