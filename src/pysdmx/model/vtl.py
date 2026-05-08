@@ -21,12 +21,10 @@ class Transformation(Item, frozen=True, omit_defaults=True):
     """A statement which assigns the outcome of an expression to a result.
 
     Attributes:
-        expression: str.
-          The expression bound to the Transformation (no semicolon).
-        result: str.
-          The Dataset or Scalar name where we store the result.
-        is_persistent: bool = False.
-          If the result is persistent.
+        expression: The expression bound to the Transformation
+            (no semicolon).
+        result: The Dataset or Scalar name where we store the result.
+        is_persistent: If the result is persistent.
     """
 
     expression: str = ""
@@ -198,16 +196,11 @@ class TransformationScheme(VtlScheme, frozen=True, omit_defaults=True):
     This attribute is inherited from the VTLItemScheme class.
 
     Attributes:
-        vtl_mapping_scheme: Optional[VtlMappingScheme].
-          The VTL mapping scheme.
-        name_personalisation_scheme: Optional[NamePersonalisationScheme].
-          The name personalisation scheme.
-        custom_type_scheme: Optional[CustomTypeScheme].
-          The custom type scheme.
-        ruleset_schemes: Sequence[RulesetScheme].
-          The ruleset schemes.
-        user_defined_operator_schemes: Sequence[UserDefinedOperatorScheme].
-          The user-defined operator schemes.
+        vtl_mapping_scheme: The VTL mapping scheme.
+        name_personalisation_scheme: The name personalisation scheme.
+        custom_type_scheme: The custom type scheme.
+        ruleset_schemes: The ruleset schemes.
+        user_defined_operator_schemes: The user-defined operator schemes.
     """
 
     vtl_mapping_scheme: Optional[Union[VtlMappingScheme, Reference]] = None

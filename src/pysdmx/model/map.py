@@ -149,21 +149,24 @@ class ImplicitComponentMap(
 class MultiValueMap(_BaseMap, frozen=True, omit_defaults=True, kw_only=True):
     """Provides the values for a mapping between one or more components.
 
+    The mapping can also depend on the time period.
+
+    Values in the source may represent regular expressions with capture
+    groups.
+
     Examples:
         For example, let's assume that we want to map the the code for local
-        currency (say `LC`) to an ISO 3-letter currency code, depending on the
-        country. So, if the country is `DE` (Germany), then the currency in
-        the target should be `EUR` but, if the country is `CH`, then it should
-        be `CHF`. This can be expressed with the following value maps:
+        currency (say `LC`) to an ISO 3-letter currency code, depending on
+        the country. So, if the country is `DE` (Germany), then the
+        currency in the target should be `EUR` but, if the country is
+        `CH`, then it should be `CHF`. This can be expressed with the
+        following value maps:
 
         >>> MultiValueMap(["DE", "LC"], ["EUR"])
         >>> MultiValueMap(["CH", "LC"], ["CHF"])
 
-    Also, the mapping can depending on the time period.
-
-    Examples:
-        For example, for periods before January 1999, we may want to map the
-        local currency for Germany to `DEM` and afterwards to `EUR`. This can
+        For periods before January 1999, we may want to map the local
+        currency for Germany to `DEM` and afterwards to `EUR`. This can
         be expressed with the following value maps:
 
         >>> from datetime import datetime
@@ -172,9 +175,6 @@ class MultiValueMap(_BaseMap, frozen=True, omit_defaults=True, kw_only=True):
         >>> MultiValueMap(["DE", "LC"], ["EUR"], valid_to: t1)
         >>> MultiValueMap(["DE", "LC"], ["EUR"], valid_from: t2)
         >>> MultiValueMap(["CH", "LC"], ["CHF"])
-
-    Values in the source may represent regular expressions with capture
-    groups.
 
     Attributes:
         source: One or more source values
@@ -204,17 +204,17 @@ class MultiValueMap(_BaseMap, frozen=True, omit_defaults=True, kw_only=True):
 class ValueMap(_BaseMap, frozen=True, omit_defaults=True, kw_only=True):
     """Maps the values of two components together.
 
-    Examples:
-        For example, let's assume that we want to map the ISO 2-letter country
-        code with the ISO 3-letter country code. This can be expressed with
-        the following value maps:
-
-            >>> ValueMap("BE", "BEL")
-
     Values in the source may represent regular expressions with capture
     groups.
 
-    Also, a map may have business validity associated with it.
+    A map may also have business validity associated with it.
+
+    Examples:
+        For example, let's assume that we want to map the ISO 2-letter
+        country code with the ISO 3-letter country code. This can be
+        expressed with the following value maps:
+
+            >>> ValueMap("BE", "BEL")
 
     Attributes:
         source: The source value

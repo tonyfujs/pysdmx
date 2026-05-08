@@ -58,16 +58,17 @@ class Connector(Protocol):
             provider: A data provider. If set, any dataflow for which data are
                 being provided by the supplied provider will be returned.
 
-        Returns: Iterable[DataflowRef]: A collection of dataflow references.
+        Returns:
+            A collection of dataflow references.
 
-                The references contain core information about the
-                dataflows provided by the Connector. Most importantly,
-                they contain the identifying information required to
-                retrieve more information about a specific dataflow
-                (see dataflow).
+            The references contain core information about the
+            dataflows provided by the Connector. Most importantly,
+            they contain the identifying information required to
+            retrieve more information about a specific dataflow
+            (see dataflow).
 
-                It is expected that this method, if implemented,
-                will return at least one DataflowRef object.
+            It is expected that this method, if implemented,
+            will return at least one DataflowRef object.
         """
 
     def providers(
@@ -80,7 +81,8 @@ class Connector(Protocol):
             filter_query: A search term. If set, any provider containing the
                 term in its id, name or description will be returned.
 
-        Returns: Iterable[Organisation]: A collection of data providers.
+        Returns:
+            A collection of data providers.
         """
 
     def dataflow(
@@ -101,7 +103,8 @@ class Connector(Protocol):
                 are not required, you may set metrics to False, to
                 prevent them from being computed.
 
-        Returns: DataflowInfo: Information about the requested dataflow.
+        Returns:
+            Information about the requested dataflow.
 
             The information includes:
 
@@ -145,7 +148,9 @@ class Connector(Protocol):
             updated_after: Retrieve the series updated after
                 the supplied timestamp.
 
-        Returns: A generator, to iterate over the collection matching series
+        Returns:
+            A generator, to iterate over the collection matching series.
+
             The information includes:
 
             - Some basic metadata about the series (such as an ID or name).
@@ -205,7 +210,8 @@ class Connector(Protocol):
                 of dict objects will be returned, but there are other options
                 such as pandas data frames.
 
-        Returns: A generator, to iterate over the matching data, if format is
+        Returns:
+            A generator, to iterate over the matching data, if format is
             set to dict (the default), or a pandas data frame.
         """
 
