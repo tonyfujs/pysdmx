@@ -172,8 +172,8 @@ class MultiValueMap(_BaseMap, frozen=True, omit_defaults=True, kw_only=True):
         >>> from datetime import datetime
         >>> t1 = datetime(1998, 12, 31, 23, 59, 59)
         >>> t2 = datetime(1999, 1, 1)
-        >>> MultiValueMap(["DE", "LC"], ["EUR"], valid_to: t1)
-        >>> MultiValueMap(["DE", "LC"], ["EUR"], valid_from: t2)
+        >>> MultiValueMap(["DE", "LC"], ["DEM"], valid_to=t1)
+        >>> MultiValueMap(["DE", "LC"], ["EUR"], valid_from=t2)
         >>> MultiValueMap(["CH", "LC"], ["CHF"])
 
     Attributes:

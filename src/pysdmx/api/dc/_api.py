@@ -59,7 +59,7 @@ class Connector(Protocol):
                 being provided by the supplied provider will be returned.
 
         Returns:
-            A collection of dataflow references.
+            A collection of ``Dataflow`` or ``DataflowRef`` objects.
 
             The references contain core information about the
             dataflows provided by the Connector. Most importantly,
@@ -68,7 +68,7 @@ class Connector(Protocol):
             (see dataflow).
 
             It is expected that this method, if implemented,
-            will return at least one DataflowRef object.
+            will return at least one object.
         """
 
     def providers(
