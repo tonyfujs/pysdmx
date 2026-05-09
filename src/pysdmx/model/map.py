@@ -155,7 +155,7 @@ class MultiValueMap(_BaseMap, frozen=True, omit_defaults=True, kw_only=True):
     groups.
 
     Examples:
-        For example, let's assume that we want to map the the code for local
+        For example, let's assume that we want to map the code for local
         currency (say `LC`) to an ISO 3-letter currency code, depending on
         the country. So, if the country is `DE` (Germany), then the
         currency in the target should be `EUR` but, if the country is
