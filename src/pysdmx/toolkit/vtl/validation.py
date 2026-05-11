@@ -72,7 +72,8 @@ def model_validations(model_obj: Union[VtlScheme, Item]) -> None:
 
     Args:
         model_obj: A VTLScheme or Item object.
-    raises:
+
+    Raises:
         Invalid: Invalid model object if the model object is not valid.
     """
     # We add here the check for vtl extra and add the local imports to

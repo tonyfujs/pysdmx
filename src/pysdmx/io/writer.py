@@ -88,23 +88,23 @@ def write_sdmx(
 
     Keyword Args:
         prettyprint: Whether to pretty-print the output (default: True)
-          (only for SDMX-ML).
+            (only for SDMX-ML).
         header: Custom :class:`Header <pysdmx.model.message.Header>` to
-          include in the SDMX Message (only for SDMX-ML)
+            include in the SDMX Message (only for SDMX-ML).
         dimension_at_observation: Mapping for dimension at observation
-          (only for SDMX-ML Data formats). Can be either:
+            (only for SDMX-ML Data formats). Can be either:
 
-          - A **string** with the dimension ID to apply to all datasets
-            (e.g., ``"TIME_PERIOD"``).
-          - A **dictionary** where the keys are short URNs and the values
-            are the dimension IDs for each structure
-            (e.g., ``{"Dataflow=MD:TEST_MD(1.0)": "TIME_PERIOD"}``).
+            - A **string** with the dimension ID to apply to all datasets
+              (e.g., ``"TIME_PERIOD"``).
+            - A **dictionary** where the keys are short URNs and the values
+              are the dimension IDs for each structure
+              (e.g., ``{"Dataflow=MD:TEST_MD(1.0)": "TIME_PERIOD"}``).
 
-          Overrides the header.structure
-          (if a custom header is provided).
+            Overrides the header.structure
+            (if a custom header is provided).
         partial_keys: Whether to write partial key rows for
-          series-level and group-level attributes
-          (only for SDMX-CSV 2.0 and 2.1 formats).
+            series-level and group-level attributes
+            (only for SDMX-CSV 2.0 and 2.1 formats).
 
     Returns:
         A serialised string if output_path is an empty string, otherwise None.
