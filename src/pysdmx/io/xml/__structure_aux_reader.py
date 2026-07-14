@@ -1,16 +1,29 @@
 """Parsers for reading metadata."""
 
+from collections import defaultdict
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 from msgspec import Struct
-from msgspec.structs import asdict
+from msgspec.structs import asdict, replace
 
 from pysdmx.io.xml.__tokens import (
     AGENCIES,
     AGENCY,
     AGENCY_ID,
     AGENCY_SCHEME,
+    ALIAS,
     ALIAS_LOW,
     ANNOTATION,
     ANNOTATION_TEXT,
@@ -24,11 +37,18 @@ from pysdmx.io.xml.__tokens import (
     ATT_LVL,
     ATT_REL,
     ATTACH_GROUP,
+    CATEGORISATION,
+    CATEGORISATIONS,
+    CATEGORY,
+    CATEGORY_SCHEME,
+    CATEGORY_SCHEMES,
     CL,
     CL_LOW,
     CLASS,
     CLS,
     CODE,
+    CODE_ID,
+    CODELIST_ALIAS_REF,
     CODES_LOW,
     COMPONENT_MAP,
     COMPONENT_MAPS,
@@ -43,6 +63,7 @@ from pysdmx.io.xml.__tokens import (
     CONS_ATT,
     CONSTRAINTS,
     CONTACT,
+    CONTEXT_OBJECT,
     CORE_REP,
     CS,
     CUBE_REGION,
@@ -52,8 +73,13 @@ from pysdmx.io.xml.__tokens import (
     CUSTOM_TYPES,
     DATA_CONS,
     DATA_CONSTRAINTS,
+    DATA_CONSUMER,
+    DATA_CONSUMER_SCHEME,
+    DATA_CONSUMER_SCHEMES,
     DATA_KEY_SET,
     DATA_PROV,
+    DATA_PROVIDER_SCHEME,
+    DATA_PROVIDER_SCHEMES,
     DATE_PATTERN_MAP,
     DEPARTMENT,
     DESC,
@@ -80,9 +106,18 @@ from pysdmx.io.xml.__tokens import (
     GROUP,
     GROUP_DIM,
     GROUPS_LOW,
+    HAS_FORMAL_LEVELS,
+    HIERARCHICAL_CODE,
+    HIERARCHICAL_CODELIST,
+    HIERARCHICAL_CODELISTS,
+    HIERARCHIES,
+    HIERARCHY,
+    HIERARCHY_ASSOCIATION,
+    HIERARCHY_ASSOCIATIONS,
     ID,
     INCLUDE,
     INCLUDED,
+    INCLUDED_CODELIST,
     IS_EXTERNAL_REF,
     IS_EXTERNAL_REF_LOW,
     IS_FINAL,
@@ -91,7 +126,11 @@ from pysdmx.io.xml.__tokens import (
     IS_PARTIAL_LOW,
     KEY,
     KEY_VALUE,
+    LEVEL,
+    LEVELED,
     LINK,
+    LINKED_HIERARCHY,
+    LINKED_OBJECT,
     LOCAL_CODES_LOW,
     LOCAL_DTYPE,
     LOCAL_FACETS_LOW,
@@ -102,6 +141,12 @@ from pysdmx.io.xml.__tokens import (
     ME_REL,
     MEASURE,
     METADATA,
+    METADATA_PROVIDER,
+    METADATA_PROVIDER_SCHEME,
+    METADATA_PROVIDER_SCHEMES,
+    METADATAFLOW,
+    MPA,
+    MPAS,
     MSR,
     NAME,
     NAME_PER,
@@ -110,6 +155,7 @@ from pysdmx.io.xml.__tokens import (
     NAME_PERS,
     OBSERVATION,
     ORGS,
+    PACKAGE,
     PAR_ID,
     PAR_VER,
     PROV_AGREEMENT,
@@ -125,12 +171,14 @@ from pysdmx.io.xml.__tokens import (
     RULESETS,
     SER_URL,
     SER_URL_LOW,
+    SOURCE,
     STR_URL,
     STR_URL_LOW,
     STR_USAGE,
     STRUCTURE,
     STRUCTURE_MAP,
     STRUCTURE_MAPS,
+    TARGET,
     TELEPHONE,
     TELEPHONES,
     TEXT,
@@ -172,6 +220,9 @@ from pysdmx.io.xml.__tokens import (
 from pysdmx.io.xml.utils import add_list
 from pysdmx.model import (
     AgencyScheme,
+    Categorisation,
+    Category,
+    CategoryScheme,
     Code,
     Codelist,
     ComponentMap,
@@ -182,15 +233,27 @@ from pysdmx.model import (
     CubeRegion,
     CubeValue,
     DataConstraint,
+    DataConsumer,
+    DataConsumerScheme,
     DataKey,
     DataKeyValue,
+    DataProvider,
+    DataProviderScheme,
     DataType,
     DatePatternMap,
     Facets,
     FixedValueMap,
+    HierarchicalCode,
+    Hierarchy,
+    HierarchyAssociation,
     ImplicitComponentMap,
     KeySet,
+    LevelType,
+    MetadataProvider,
+    MetadataProviderScheme,
+    MetadataProvisionAgreement,
     MultiComponentMap,
+    MultiRepresentationMap,
     MultiValueMap,
     RepresentationMap,
     StructureMap,
@@ -233,7 +296,13 @@ from pysdmx.model.vtl import (
     VtlDataflowMapping,
     VtlMappingScheme,
 )
-from pysdmx.util import find_by_urn, is_final, parse_urn
+from pysdmx.util import (
+    find_by_urn,
+    is_final,
+    parse_item_urn,
+    parse_short_item_urn,
+    parse_urn,
+)
 
 T = Any
 
@@ -242,10 +311,20 @@ def _identity(x: T) -> T:
     return x
 
 
+def _convert(converter: Callable[[Any], Any], value: Any) -> Any:
+    """Applies a converter to a value, or to each item if it is a list."""
+    if isinstance(value, list):
+        return [converter(v) for v in value]
+    return converter(value)
+
+
 STRUCTURES_MAPPING = {
     CL: Codelist,
     VALUE_LIST: Codelist,
     AGENCY_SCHEME: AgencyScheme,
+    DATA_PROVIDER_SCHEME: DataProviderScheme,
+    METADATA_PROVIDER_SCHEME: MetadataProviderScheme,
+    DATA_CONSUMER_SCHEME: DataConsumerScheme,
     CS: ConceptScheme,
     DFWS: Dataflow,
     DSDS: DataStructureDefinition,
@@ -261,13 +340,20 @@ STRUCTURES_MAPPING = {
     NAME_PER_SCHEME: NamePersonalisationScheme,
     CUSTOM_TYPE_SCHEME: CustomTypeScheme,
     PROV_AGREEMENTS: ProvisionAgreement,
+    MPAS: MetadataProvisionAgreement,
     CONSTRAINTS: DataConstraint,
     DATA_CONSTRAINTS: DataConstraint,
+    CATEGORY_SCHEME: CategoryScheme,
+    CATEGORISATION: Categorisation,
 }
 ITEMS_CLASSES = {
     AGENCY: Agency,
+    DATA_PROV: DataProvider,
+    METADATA_PROVIDER: MetadataProvider,
+    DATA_CONSUMER: DataConsumer,
     CODE: Code,
     VALUE_ITEM: Code,
+    CATEGORY: Category,
     CON: Concept,
     RULE: Ruleset,
     UDO: UserDefinedOperator,
@@ -277,6 +363,19 @@ ITEMS_CLASSES = {
     VTL_CON_MAPP: VtlConceptMapping,
     NAME_PER: NamePersonalisation,
     CUSTOM_TYPE: CustomType,
+}
+
+# Item-class tokens whose items are Organisations (and may carry contacts).
+ORG_ITEM_CLASSES = (AGENCY, DATA_PROV, METADATA_PROVIDER, DATA_CONSUMER)
+
+# Organisation scheme tokens mapped to their item tokens. In SDMX-ML 2.1 all
+# of these schemes may appear together inside a single OrganisationSchemes
+# wrapper.
+ORG_SCHEME_ITEMS = {
+    AGENCY_SCHEME: AGENCY,
+    DATA_PROVIDER_SCHEME: DATA_PROV,
+    DATA_CONSUMER_SCHEME: DATA_CONSUMER,
+    METADATA_PROVIDER_SCHEME: METADATA_PROVIDER,
 }
 
 COMP_TYPES = [DIM, ATT, MEASURE, MSR, GROUP_DIM]
@@ -353,11 +452,15 @@ class StructureParser(Struct):
     """StructureParser class for SDMX-ML."""
 
     agencies: Dict[str, AgencyScheme] = {}
+    data_provider_schemes: Dict[str, DataProviderScheme] = {}
+    metadata_provider_schemes: Dict[str, MetadataProviderScheme] = {}
+    data_consumer_schemes: Dict[str, DataConsumerScheme] = {}
     codelists: Dict[str, Codelist] = {}
     valuelists: Dict[str, Codelist] = {}
     concepts: Dict[str, ConceptScheme] = {}
     datastructures: Dict[str, DataStructureDefinition] = {}
     dataflows: Dict[str, Dataflow] = {}
+    metadata_provision_agreements: Dict[str, MetadataProvisionAgreement] = {}
     constraints: Dict[str, DataConstraint] = {}
     rulesets: Dict[str, RulesetScheme] = {}
     udos: Dict[str, UserDefinedOperatorScheme] = {}
@@ -365,10 +468,14 @@ class StructureParser(Struct):
     structure_maps: Dict[str, StructureMap] = {}
     component_maps: Dict[str, ComponentMap] = {}
     fixed_value_maps: Dict[str, FixedValueMap] = {}
-    representation_maps: Dict[str, RepresentationMap] = {}
+    representation_maps: Dict[
+        str, Union[RepresentationMap, MultiRepresentationMap]
+    ] = {}
     name_personalisations: Dict[str, NamePersonalisationScheme] = {}
     custom_types: Dict[str, CustomTypeScheme] = {}
     transformations: Dict[str, TransformationScheme] = {}
+    category_schemes: Dict[str, CategoryScheme] = {}
+    categorisations: Dict[str, Categorisation] = {}
     is_sdmx_30: bool = False
 
     def __format_contact(self, json_contact: Dict[str, Any]) -> Contact:
@@ -517,16 +624,21 @@ class StructureParser(Struct):
         return element
 
     def __format_orgs(self, json_orgs: Dict[str, Any]) -> Dict[str, Any]:
+        """Formats the SDMX-ML 2.1 OrganisationSchemes wrapper.
+
+        In SDMX-ML 2.1 every organisation scheme (agency, data provider,
+        data consumer and metadata provider schemes) is nested inside a
+        single ``OrganisationSchemes`` wrapper, so the wrapper may hold
+        several scheme types at once. Each present type is dispatched to
+        the generic scheme parser.
+        """
         orgs: Dict[str, Any] = {}
         json_list = add_list(json_orgs)
         for e in json_list:
             self.__strip_agency_scheme_defaults(e)
-            ag_sch = self.__format_scheme(
-                e,
-                AGENCY_SCHEME,
-                AGENCY,
-            )
-            orgs = {**orgs, **ag_sch}
+            for scheme, item in ORG_SCHEME_ITEMS.items():
+                if scheme in e:
+                    orgs = {**orgs, **self.__format_scheme(e, scheme, item)}
         return orgs
 
     @staticmethod
@@ -537,8 +649,13 @@ class StructureParser(Struct):
 
         The SDMX standard defines fixed values for AgencyScheme id,
         name, and version. Stripping them when they match the defaults
-        aligns the XML reader with the JSON reader behavior.
+        aligns the XML reader with the JSON reader behavior. Only the
+        AgencyScheme is stripped: the other organisation schemes have
+        different defaults and are left untouched (matching the JSON
+        reader).
         """
+        if AGENCY_SCHEME not in element:
+            return
         for s in add_list(element[AGENCY_SCHEME]):
             for k, v in [("id", "AGENCIES"), ("version", "1.0")]:
                 if s.get(k) == v:
@@ -546,6 +663,57 @@ class StructureParser(Struct):
             name = s.get(NAME)
             if name is not None and _extract_text(name) == "AGENCIES":
                 del s[NAME]
+
+    @staticmethod
+    def __provider_dataflows(
+        agreements: Sequence[Tuple[str, str]],
+    ) -> Dict[str, Set[DataflowRef]]:
+        """Maps "agency:provider_id" to the set of provided dataflows.
+
+        Mirrors the SDMX-JSON behavior where the dataflows attached to a
+        (metadata) provider are derived from the (metadata) provision
+        agreements. Each agreement is supplied as a
+        ``(flow_urn, provider_urn)`` pair so the same logic serves both
+        data and metadata provision agreements.
+        """
+        paprs: Dict[str, Set[DataflowRef]] = defaultdict(set)
+        for flow_urn, provider_urn in agreements:
+            df = parse_urn(flow_urn)
+            ref = parse_short_item_urn(provider_urn)
+            df_ref = DataflowRef(
+                id=df.id, agency=df.agency, version=df.version
+            )
+            paprs[f"{ref.agency}:{ref.item_id}"].add(df_ref)
+        return paprs
+
+    def __enrich_provider_schemes(
+        self,
+        schemes: Dict[str, ItemScheme],
+        scheme_type: Type[ItemScheme],
+        agreements: Sequence[Tuple[str, str]],
+    ) -> Dict[str, ItemScheme]:
+        """Populates provider dataflows from the (metadata) agreements.
+
+        Rebuilds each provider scheme of ``scheme_type`` so that every
+        provider item carries the dataflows it provides, as derived from
+        the supplied ``(flow_urn, provider_urn)`` agreement pairs.
+        """
+        if not schemes or not agreements:
+            return schemes
+        paprs = self.__provider_dataflows(agreements)
+        enriched: Dict[str, ItemScheme] = {}
+        for urn, scheme in schemes.items():
+            if not isinstance(scheme, scheme_type):
+                enriched[urn] = scheme
+                continue
+            agency = scheme.agency
+            agency_id = agency.id if isinstance(agency, Agency) else agency
+            items = [
+                replace(item, dataflows=list(paprs[f"{agency_id}:{item.id}"]))
+                for item in scheme.items
+            ]
+            enriched[urn] = replace(scheme, items=items)
+        return enriched
 
     def __format_representation(
         self, json_rep: Dict[str, Any], json_obj: Dict[str, Any]
@@ -962,6 +1130,35 @@ class StructureParser(Struct):
 
         return element
 
+    def __format_metadata_prov_agreement(
+        self, element: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Formats a MetadataProvisionAgreement into model keys.
+
+        Mirrors ``__format_prov_agreement`` but the children are a
+        ``<str:Metadataflow>`` and a ``<str:MetadataProvider>`` (an
+        organisation item, hence an item-style short URN). The MPA construct
+        only exists in SDMX-ML 3.x, where references are URN text.
+        """
+        ref_flow = parse_urn(element[METADATAFLOW])
+        metadataflow = (
+            f"{ref_flow.sdmx_type}={ref_flow.agency}:"
+            f"{ref_flow.id}({ref_flow.version})"
+        )
+        del element[METADATAFLOW]
+
+        ref_provider = parse_item_urn(element[METADATA_PROVIDER])
+        metadata_provider = (
+            f"{ref_provider.sdmx_type}={ref_provider.agency}:"
+            f"{ref_provider.id}({ref_provider.version})"
+            f".{ref_provider.item_id}"
+        )
+        del element[METADATA_PROVIDER]
+
+        element[METADATAFLOW.lower()] = metadataflow
+        element["metadata_provider"] = metadata_provider
+        return element
+
     def __parse_data_provider(
         self, attachment: Dict[str, Any]
     ) -> Optional[str]:
@@ -1214,7 +1411,7 @@ class StructureParser(Struct):
     ) -> Item:
         item_json_info = self.__format_annotations(item_json_info)
         item_json_info = self.__format_name_description(item_json_info)
-        if CONTACT in item_json_info and item_name_class == AGENCY:
+        if CONTACT in item_json_info and item_name_class in ORG_ITEM_CLASSES:
             item_json_info[CONTACT] = add_list(item_json_info[CONTACT])
             contacts = [
                 self.__format_contact(e) for e in item_json_info[CONTACT]
@@ -1295,6 +1492,21 @@ class StructureParser(Struct):
             values=child_dict["values"],
         )
 
+    def __build_representation_map(
+        self, structure: Dict[str, Any]
+    ) -> Union[RepresentationMap, MultiRepresentationMap]:
+        src_list = add_list(structure.get("source"))
+        tgt_list = add_list(structure.get("target"))
+
+        if len(src_list) != 1 or len(tgt_list) != 1:
+            structure["source"] = src_list
+            structure["target"] = tgt_list
+            return MultiRepresentationMap(**structure)
+
+        structure["source"] = src_list[0]
+        structure["target"] = tgt_list[0]
+        return RepresentationMap(**structure)
+
     def __build_representation_mapping(
         self, child_dict: Dict[str, Any]
     ) -> Union[ValueMap, MultiValueMap]:
@@ -1352,7 +1564,9 @@ class StructureParser(Struct):
         for xml_key, py_key in renames.items():
             if xml_key in element:
                 value = element.pop(xml_key)
-                element[py_key] = converters.get(xml_key, _identity)(value)
+                element[py_key] = _convert(
+                    converters.get(xml_key, _identity), value
+                )
 
         child_class_mapping: Dict[str, Type[Any]] = {
             "ComponentMap": ComponentMap,
@@ -1395,6 +1609,27 @@ class StructureParser(Struct):
 
         return element
 
+    @staticmethod
+    def __prefix_agency_ids(agencies: List[Item], owner: str) -> List[Item]:
+        """Reconstructs owner-prefixed sub-agency ids (mirrors SDMX-JSON).
+
+        SDMX-ML stores the local sub-agency id, whereas pysdmx (like the
+        SDMX-JSON ``__add_owner``) keeps it as ``owner.local`` unless the
+        scheme owner is ``SDMX``. Rebuilding the prefixed id lets an agency
+        scheme read from SDMX-ML match the same scheme read from SDMX-JSON.
+        Top-level ("SDMX"-owned) agencies keep their local id.
+
+        Args:
+            agencies: The agency items parsed from SDMX-ML.
+            owner: The agency id of the enclosing AgencyScheme.
+
+        Returns:
+            The agency items with owner-prefixed ids where applicable.
+        """
+        if owner == "SDMX":
+            return agencies
+        return [replace(a, id=f"{owner}.{a.id}") for a in agencies]
+
     def __format_scheme(
         self, json_elem: Dict[str, Any], scheme: str, item: str
     ) -> Dict[str, ItemScheme]:
@@ -1427,6 +1662,8 @@ class StructureParser(Struct):
                     ]
                 )
                 del element[item]
+            if scheme == AGENCY_SCHEME:
+                items = self.__prefix_agency_ids(items, element[AGENCY_ID])
             element["items"] = items
             element = self.__format_agency(element)
             element = self.__format_validity(element)
@@ -1440,6 +1677,395 @@ class StructureParser(Struct):
             result: ItemScheme = STRUCTURES_MAPPING[scheme](**element)
             elements[result.short_urn] = result
 
+        return elements
+
+    def __format_category(self, element: Dict[str, Any]) -> Category:
+        """Recursively formats a Category element into the model.
+
+        The dataflows and other references attached to the category are
+        left empty here; they are filled in by the categorisation
+        enrichment post-pass in ``format_structures``.
+        """
+        element = self.__format_annotations(element)
+        element = self.__format_name_description(element)
+        children = (
+            [
+                self.__format_category(child)
+                for child in add_list(element[CATEGORY])
+            ]
+            if CATEGORY in element
+            else []
+        )
+        return Category(
+            id=element[ID],
+            name=element.get(NAME.lower()),
+            description=element.get(DESC.lower()),
+            categories=tuple(children),
+            annotations=tuple(element.get(ANNOTATIONS.lower(), ())),
+        )
+
+    def __format_category_scheme(
+        self, json_elem: Dict[str, Any]
+    ) -> Dict[str, CategoryScheme]:
+        """Formats CategorySchemes into the model."""
+        elements: Dict[str, CategoryScheme] = {}
+        for element in add_list(json_elem[CATEGORY_SCHEME]):
+            element = self.__format_annotations(element)
+            element = self.__format_name_description(element)
+            element = self.__format_urls(element)
+            if IS_EXTERNAL_REF in element:
+                element[IS_EXTERNAL_REF_LOW] = (
+                    element.pop(IS_EXTERNAL_REF) == "true"
+                )
+            if IS_FINAL in element:
+                element[IS_FINAL_LOW] = element.pop(IS_FINAL) == "true"
+            elif self.is_sdmx_30 and VERSION in element:
+                element[IS_FINAL_LOW] = is_final(element[VERSION])
+            if IS_PARTIAL in element:
+                element[IS_PARTIAL_LOW] = element.pop(IS_PARTIAL) == "true"
+            items = (
+                tuple(
+                    self.__format_category(cat)
+                    for cat in add_list(element[CATEGORY])
+                )
+                if CATEGORY in element
+                else ()
+            )
+            element.pop(CATEGORY, None)
+            element["items"] = items
+            element = self.__format_agency(element)
+            element = self.__format_validity(element)
+            if "xmlns" in element:
+                del element["xmlns"]
+            result = CategoryScheme(**element)
+            elements[result.short_urn] = result
+        return elements
+
+    @staticmethod
+    def __categorisation_ref(ref_elem: Any, maintainable: bool) -> str:
+        """Resolves a categorisation Source/Target reference.
+
+        Handles the 3.0/3.1 direct-URN string, the ``<URN>`` element
+        form and the 2.1 ``<Ref>`` form. The output is the full URN
+        string stored in ``Categorisation.source``/``.target``, matching
+        the canonical form produced by the SDMX-JSON reader so that
+        categorisations round-trip across formats.
+
+        Args:
+            ref_elem: The Source or Target element.
+            maintainable: Whether the reference is to a maintainable
+                artefact (Source) or to an item (Target).
+
+        Returns:
+            The full URN string representation of the reference.
+        """
+        if isinstance(ref_elem, dict) and REF in ref_elem:
+            data = ref_elem[REF]
+            # The package and class are attributes on the Ref itself, so
+            # the full URN is built directly from the reference's data.
+            base = (
+                "urn:sdmx:org.sdmx.infomodel."
+                f"{data[PACKAGE]}.{data[CLASS]}={data[AGENCY_ID]}:"
+            )
+            if maintainable:
+                return f"{base}{data[ID]}({data.get(VERSION, '1.0')})"
+            return (
+                f"{base}{data[PAR_ID]}({data.get(PAR_VER, '1.0')}).{data[ID]}"
+            )
+        # The <URN> element and 3.0/3.1 plain-string forms already carry
+        # the full URN, so it is returned as-is.
+        if isinstance(ref_elem, dict) and URN in ref_elem:
+            return str(ref_elem[URN])
+        return str(ref_elem)
+
+    def __format_categorisation(
+        self, json_elem: Dict[str, Any]
+    ) -> Dict[str, Categorisation]:
+        """Formats Categorisations into the model."""
+        elements: Dict[str, Categorisation] = {}
+        for element in add_list(json_elem[CATEGORISATION]):
+            element = self.__format_annotations(element)
+            element = self.__format_name_description(element)
+            element = self.__format_urls(element)
+            if IS_EXTERNAL_REF in element:
+                element[IS_EXTERNAL_REF_LOW] = (
+                    element.pop(IS_EXTERNAL_REF) == "true"
+                )
+            if IS_FINAL in element:
+                element[IS_FINAL_LOW] = element.pop(IS_FINAL) == "true"
+            elif self.is_sdmx_30 and VERSION in element:
+                element[IS_FINAL_LOW] = is_final(element[VERSION])
+            element["source"] = self.__categorisation_ref(
+                element.pop(SOURCE), maintainable=True
+            )
+            element["target"] = self.__categorisation_ref(
+                element.pop(TARGET), maintainable=False
+            )
+            element = self.__format_agency(element)
+            element = self.__format_validity(element)
+            if "xmlns" in element:
+                del element["xmlns"]
+            result = Categorisation(**element)
+            elements[result.short_urn] = result
+        return elements
+
+    def __format_level(self, level_elem: Dict[str, Any]) -> LevelType:
+        """Recursively formats a Level element into a LevelType."""
+        level_elem = self.__format_annotations(level_elem)
+        level_elem = self.__format_name_description(level_elem)
+        child = (
+            self.__format_level(level_elem[LEVEL])
+            if LEVEL in level_elem
+            else None
+        )
+        return LevelType(
+            id=level_elem[ID],
+            name=level_elem.get(NAME.lower()),
+            description=level_elem.get(DESC.lower()),
+            annotations=tuple(level_elem.get(ANNOTATIONS.lower(), ())),
+            level=child,
+        )
+
+    @staticmethod
+    def __urn_from_code_ref(ref: Dict[str, Any]) -> str:
+        """Builds a code URN from an SDMX-ML 2.1 <Code> reference."""
+        return (
+            "urn:sdmx:org.sdmx.infomodel.codelist.Code="
+            f"{ref[AGENCY_ID]}:{ref[PAR_ID]}({ref[PAR_VER]}).{ref[ID]}"
+        )
+
+    def __format_code_ref(
+        self, hc_elem: Dict[str, Any], aliases: Dict[str, str]
+    ) -> str:
+        """Resolves the referenced code URN (text, <Ref> or alias forms)."""
+        if CODE in hc_elem:
+            code_val = hc_elem[CODE]
+            if isinstance(code_val, dict):
+                return self.__urn_from_code_ref(code_val[REF])
+            return _extract_text(code_val)
+        alias = _extract_text(hc_elem[CODELIST_ALIAS_REF])
+        code_id = str(hc_elem[CODE_ID][REF][ID])
+        return f"{aliases[alias]}.{code_id}"
+
+    @staticmethod
+    def __format_level_ref(level_val: Any) -> str:
+        """Resolves a per-code level id (text or <Ref> forms)."""
+        if isinstance(level_val, dict):
+            return str(level_val[REF][ID])
+        return _extract_text(level_val)
+
+    def __format_hierarchical_code(
+        self,
+        hc_elem: Dict[str, Any],
+        aliases: Optional[Dict[str, str]] = None,
+    ) -> HierarchicalCode:
+        """Formats a HierarchicalCode element into the model."""
+        aliases = aliases or {}
+        hc_elem = self.__format_annotations(hc_elem)
+        children = (
+            [
+                self.__format_hierarchical_code(child, aliases)
+                for child in add_list(hc_elem[HIERARCHICAL_CODE])
+            ]
+            if HIERARCHICAL_CODE in hc_elem
+            else []
+        )
+        rel_valid_from = (
+            datetime.fromisoformat(hc_elem[VALID_FROM])
+            if VALID_FROM in hc_elem
+            else None
+        )
+        rel_valid_to = (
+            datetime.fromisoformat(hc_elem[VALID_TO])
+            if VALID_TO in hc_elem
+            else None
+        )
+        level = (
+            self.__format_level_ref(hc_elem[LEVEL])
+            if LEVEL in hc_elem
+            else None
+        )
+        return HierarchicalCode(
+            id=hc_elem[ID],
+            rel_valid_from=rel_valid_from,
+            rel_valid_to=rel_valid_to,
+            codes=tuple(children),
+            annotations=tuple(hc_elem.get(ANNOTATIONS.lower(), ())),
+            urn=self.__format_code_ref(hc_elem, aliases),
+            level=level,
+        )
+
+    def __format_hierarchy(
+        self, json_hierarchies: Dict[str, Any]
+    ) -> Dict[str, Hierarchy]:
+        """Formats the hierarchies (SDMX-ML 3.0/3.1) into the model."""
+        elements: Dict[str, Hierarchy] = {}
+        for element in add_list(json_hierarchies[HIERARCHY]):
+            element = self.__format_annotations(element)
+            element = self.__format_name_description(element)
+            element = self.__format_urls(element)
+            element = self.__format_agency(element)
+            element = self.__format_validity(element)
+            if IS_EXTERNAL_REF in element:
+                element[IS_EXTERNAL_REF_LOW] = (
+                    element.pop(IS_EXTERNAL_REF) == "true"
+                )
+            has_formal_levels = (
+                element.pop(HAS_FORMAL_LEVELS, "false") == "true"
+            )
+            level = (
+                self.__format_level(element[LEVEL])
+                if LEVEL in element
+                else None
+            )
+            codes = (
+                [
+                    self.__format_hierarchical_code(child)
+                    for child in add_list(element[HIERARCHICAL_CODE])
+                ]
+                if HIERARCHICAL_CODE in element
+                else []
+            )
+            version = element.get(VERSION, "1.0")
+            hierarchy = Hierarchy(
+                id=element[ID],
+                name=element.get(NAME.lower()),
+                description=element.get(DESC.lower()),
+                agency=element[AGENCY.lower()],
+                version=version,
+                valid_from=element.get(VALID_FROM_LOW),
+                valid_to=element.get(VALID_TO_LOW),
+                annotations=tuple(element.get(ANNOTATIONS.lower(), ())),
+                is_external_reference=element.get(IS_EXTERNAL_REF_LOW, False),
+                is_final=is_final(version),
+                has_formal_levels=has_formal_levels,
+                level=level,
+                codes=tuple(codes),
+            )
+            elements[hierarchy.short_urn] = hierarchy
+        return elements
+
+    @staticmethod
+    def __format_codelist_aliases(hcl: Dict[str, Any]) -> Dict[str, str]:
+        """Maps each IncludedCodelist alias to a code-URN prefix."""
+        aliases: Dict[str, str] = {}
+        for incl in add_list(hcl.get(INCLUDED_CODELIST, [])):
+            ref = incl[REF]
+            aliases[incl[ALIAS]] = (
+                "urn:sdmx:org.sdmx.infomodel.codelist.Code="
+                f"{ref[AGENCY_ID]}:{ref[ID]}({ref.get(VERSION, '1.0')})"
+            )
+        return aliases
+
+    def __format_inner_hierarchy(
+        self,
+        inner: Dict[str, Any],
+        meta: Dict[str, Any],
+        aliases: Dict[str, str],
+    ) -> Hierarchy:
+        """Formats an SDMX-ML 2.1 inner <Hierarchy> into the model.
+
+        The wrapping codelist (the maintainable) carries the agency,
+        version, validity, annotations and description, so those are taken
+        from ``meta``; the inner element supplies the id, name and codes.
+        """
+        inner = self.__format_name_description(inner)
+        has_formal_levels = inner.pop(LEVELED, "false") == "true"
+        level = self.__format_level(inner[LEVEL]) if LEVEL in inner else None
+        codes = (
+            [
+                self.__format_hierarchical_code(child, aliases)
+                for child in add_list(inner[HIERARCHICAL_CODE])
+            ]
+            if HIERARCHICAL_CODE in inner
+            else []
+        )
+        version = meta["version"]
+        return Hierarchy(
+            id=inner[ID],
+            name=inner.get(NAME.lower()),
+            description=meta["description"],
+            agency=meta["agency"],
+            version=version,
+            valid_from=meta["valid_from"],
+            valid_to=meta["valid_to"],
+            annotations=meta["annotations"],
+            is_external_reference=meta["is_external_reference"],
+            is_final=is_final(version),
+            has_formal_levels=has_formal_levels,
+            level=level,
+            codes=tuple(codes),
+        )
+
+    def __format_hierarchical_codelist(
+        self, json_hcls: Dict[str, Any]
+    ) -> Dict[str, Hierarchy]:
+        """Formats SDMX-ML 2.1 HierarchicalCodelists into the model.
+
+        Each inner ``<Hierarchy>`` becomes a separate pysdmx ``Hierarchy``,
+        inheriting the maintainable metadata (agency, version, validity,
+        description, annotations) of the wrapping codelist.
+        """
+        elements: Dict[str, Hierarchy] = {}
+        for hcl in add_list(json_hcls[HIERARCHICAL_CODELIST]):
+            aliases = self.__format_codelist_aliases(hcl)
+            hcl = self.__format_annotations(hcl)
+            hcl = self.__format_name_description(hcl)
+            hcl = self.__format_agency(hcl)
+            hcl = self.__format_validity(hcl)
+            if IS_EXTERNAL_REF in hcl:
+                hcl[IS_EXTERNAL_REF_LOW] = hcl.pop(IS_EXTERNAL_REF) == "true"
+            meta = {
+                "agency": hcl[AGENCY.lower()],
+                "version": hcl.get(VERSION, "1.0"),
+                "description": hcl.get(DESC.lower()),
+                "valid_from": hcl.get(VALID_FROM_LOW),
+                "valid_to": hcl.get(VALID_TO_LOW),
+                "is_external_reference": hcl.get(IS_EXTERNAL_REF_LOW, False),
+                "annotations": tuple(hcl.get(ANNOTATIONS.lower(), ())),
+            }
+            for inner in add_list(hcl.get(HIERARCHY, [])):
+                hierarchy = self.__format_inner_hierarchy(inner, meta, aliases)
+                elements[hierarchy.short_urn] = hierarchy
+        return elements
+
+    def __format_hierarchy_association(
+        self, json_has: Dict[str, Any]
+    ) -> Dict[str, HierarchyAssociation]:
+        """Formats SDMX-ML 3.0/3.1 HierarchyAssociations into the model."""
+        elements: Dict[str, HierarchyAssociation] = {}
+        for element in add_list(json_has[HIERARCHY_ASSOCIATION]):
+            element = self.__format_annotations(element)
+            element = self.__format_name_description(element)
+            element = self.__format_urls(element)
+            element = self.__format_agency(element)
+            element = self.__format_validity(element)
+            if IS_EXTERNAL_REF in element:
+                element[IS_EXTERNAL_REF_LOW] = (
+                    element.pop(IS_EXTERNAL_REF) == "true"
+                )
+            context = (
+                _extract_text(element[CONTEXT_OBJECT])
+                if CONTEXT_OBJECT in element
+                else ""
+            )
+            version = element.get(VERSION, "1.0")
+            ha = HierarchyAssociation(
+                id=element[ID],
+                name=element.get(NAME.lower()),
+                description=element.get(DESC.lower()),
+                agency=element[AGENCY.lower()],
+                version=version,
+                valid_from=element.get(VALID_FROM_LOW),
+                valid_to=element.get(VALID_TO_LOW),
+                annotations=tuple(element.get(ANNOTATIONS.lower(), ())),
+                is_external_reference=element.get(IS_EXTERNAL_REF_LOW, False),
+                is_final=is_final(version),
+                hierarchy=_extract_text(element[LINKED_HIERARCHY]),
+                component_ref=_extract_text(element[LINKED_OBJECT]),
+                context_ref=context,
+            )
+            elements[ha.short_urn] = ha
         return elements
 
     def __format_schema(  # noqa: C901
@@ -1477,9 +2103,14 @@ class StructureParser(Struct):
             element = self.__format_validity(element)
             element = self.__format_groups(element)
             element = self.__format_components(element)
-            element = self.__format_maps(element)
+            # The MPA must not go through the mapping renames (which would
+            # rename its <str:Target>-style children to "target").
+            if item != MPA:
+                element = self.__format_maps(element)
             if item == PROV_AGREEMENT:
                 element = self.__format_prov_agreement(element)
+            if item == MPA:
+                element = self.__format_metadata_prov_agreement(element)
             if item in [CON_CONS, DATA_CONS]:
                 element = self.__format_constraint(element)
 
@@ -1519,7 +2150,10 @@ class StructureParser(Struct):
                     structure[COMPS] = Components(structure[COMPS])
                 else:
                     structure[COMPS] = Components([])
-            schemas[short_urn] = STRUCTURES_MAPPING[schema](**structure)
+            if schema == REPRESENTATION_MAP:
+                schemas[short_urn] = self.__build_representation_map(structure)
+            else:
+                schemas[short_urn] = STRUCTURES_MAPPING[schema](**structure)
 
         return schemas
 
@@ -1548,9 +2182,33 @@ class StructureParser(Struct):
             return {}
 
         structures = {
-            ORGS: process_structure(ORGS, self.__format_orgs, "agencies"),
+            # SDMX-ML 2.1: a single wrapper holding every organisation
+            # scheme type, so it is not stored into the AgencyScheme-typed
+            # attribute to avoid mixing types.
+            ORGS: process_structure(ORGS, self.__format_orgs),
             AGENCIES: process_structure(
                 AGENCIES, self.__format_orgs, "agencies"
+            ),
+            DATA_PROVIDER_SCHEMES: process_structure(
+                DATA_PROVIDER_SCHEMES,
+                lambda data: self.__format_scheme(
+                    data, DATA_PROVIDER_SCHEME, DATA_PROV
+                ),
+                "data_provider_schemes",
+            ),
+            METADATA_PROVIDER_SCHEMES: process_structure(
+                METADATA_PROVIDER_SCHEMES,
+                lambda data: self.__format_scheme(
+                    data, METADATA_PROVIDER_SCHEME, METADATA_PROVIDER
+                ),
+                "metadata_provider_schemes",
+            ),
+            DATA_CONSUMER_SCHEMES: process_structure(
+                DATA_CONSUMER_SCHEMES,
+                lambda data: self.__format_scheme(
+                    data, DATA_CONSUMER_SCHEME, DATA_CONSUMER
+                ),
+                "data_consumer_schemes",
             ),
             CLS: process_structure(
                 CLS,
@@ -1563,6 +2221,18 @@ class StructureParser(Struct):
                     data, VALUE_LIST, VALUE_ITEM
                 ),
                 "valuelists",
+            ),
+            HIERARCHIES: process_structure(
+                HIERARCHIES,
+                self.__format_hierarchy,
+            ),
+            HIERARCHICAL_CODELISTS: process_structure(
+                HIERARCHICAL_CODELISTS,
+                self.__format_hierarchical_codelist,
+            ),
+            HIERARCHY_ASSOCIATIONS: process_structure(
+                HIERARCHY_ASSOCIATIONS,
+                self.__format_hierarchy_association,
             ),
             CON_SCHEMES: process_structure(
                 CON_SCHEMES,
@@ -1589,6 +2259,21 @@ class StructureParser(Struct):
                 lambda data: self.__format_schema(
                     data, PROV_AGREEMENTS, PROV_AGREEMENT
                 ),
+            ),
+            CATEGORY_SCHEMES: process_structure(
+                CATEGORY_SCHEMES,
+                self.__format_category_scheme,
+                "category_schemes",
+            ),
+            CATEGORISATIONS: process_structure(
+                CATEGORISATIONS,
+                self.__format_categorisation,
+                "categorisations",
+            ),
+            MPAS: process_structure(
+                MPAS,
+                lambda data: self.__format_schema(data, MPAS, MPA),
+                "metadata_provision_agreements",
             ),
             VTLMAPPINGS: process_structure(
                 VTLMAPPINGS,
@@ -1715,9 +2400,144 @@ class StructureParser(Struct):
                 "transformations",
             ),
         }
+        self.__enrich_category_schemes(structures.get(CATEGORY_SCHEMES, {}))
+        # Enrich provider schemes with the dataflows derived from the
+        # parsed provision agreements (SDMX-JSON parity). Data provider
+        # schemes derive from ProvisionAgreements while metadata provider
+        # schemes derive from MetadataProvisionAgreements; both scheme
+        # types may also live together inside the 2.1 OrganisationSchemes
+        # wrapper, so the type-filtered enrichment is run over that bucket
+        # as well.
+        data_pas = [
+            (pa.dataflow, pa.provider)
+            for pa in structures[PROV_AGREEMENTS].values()
+        ]
+        metadata_pas = [
+            (mpa.metadataflow, mpa.metadata_provider)
+            for mpa in structures[MPAS].values()
+        ]
+        enrichments = (
+            (DataProviderScheme, data_pas),
+            (MetadataProviderScheme, metadata_pas),
+        )
+        for key in (
+            ORGS,
+            DATA_PROVIDER_SCHEMES,
+            METADATA_PROVIDER_SCHEMES,
+        ):
+            for scheme_type, agreements in enrichments:
+                if structures[key]:
+                    structures[key] = self.__enrich_provider_schemes(
+                        structures[key], scheme_type, agreements
+                    )
         return [
             compound
             for value in structures.values()
             if value
             for compound in value.values()
         ]
+
+    def __rebuild_category(
+        self,
+        category: Category,
+        parent_path: str,
+        flows: Dict[str, List[DataflowRef]],
+        others: Dict[str, List[Union[ItemReference, Reference]]],
+    ) -> Category:
+        """Rebuilds a category attaching the categorised references.
+
+        The category tree is immutable, so a new tree is built by path.
+        """
+        path = f"{parent_path}.{category.id}" if parent_path else category.id
+        return Category(
+            id=category.id,
+            name=category.name,
+            description=category.description,
+            annotations=category.annotations,
+            categories=tuple(
+                self.__rebuild_category(child, path, flows, others)
+                for child in category.categories
+            ),
+            dataflows=tuple(flows.get(path, ())),
+            other_references=tuple(others.get(path, ())),
+        )
+
+    def __enrich_category_schemes(
+        self, category_schemes: Dict[str, CategoryScheme]
+    ) -> None:
+        """Attaches categorised dataflows/references to category schemes.
+
+        This mirrors the SDMX-JSON behaviour: each categorisation whose
+        target is a category in one of the schemes contributes either a
+        dataflow (when the source is a dataflow) or a reference to the
+        targeted category. As the model is immutable, the affected
+        category trees are rebuilt in place.
+        """
+        if not category_schemes or not self.categorisations:
+            return
+        flows: Dict[str, Dict[str, List[DataflowRef]]] = {}
+        others: Dict[
+            str, Dict[str, List[Union[ItemReference, Reference]]]
+        ] = {}
+        for cat in self.categorisations.values():
+            target = parse_urn(cat.target)
+            scheme_urn = (
+                f"CategoryScheme={target.agency}:{target.id}({target.version})"
+            )
+            if scheme_urn not in category_schemes:
+                continue
+            path = cat.target[cat.target.find(")") + 2 :]
+            source = parse_urn(cat.source)
+            if source.sdmx_type == "Dataflow":
+                flow = self.__resolve_dataflow(source)
+                flows.setdefault(scheme_urn, {}).setdefault(path, []).append(
+                    flow
+                )
+            else:
+                others.setdefault(scheme_urn, {}).setdefault(path, []).append(
+                    source
+                )
+        for urn, scheme in list(category_schemes.items()):
+            scheme_flows = flows.get(urn, {})
+            scheme_others = others.get(urn, {})
+            if not scheme_flows and not scheme_others:
+                continue
+            category_schemes[urn] = replace(
+                scheme,
+                items=tuple(
+                    self.__rebuild_category(
+                        cat, "", scheme_flows, scheme_others
+                    )
+                    for cat in scheme.items
+                ),
+            )
+
+    def __resolve_dataflow(
+        self, source: Union[Reference, ItemReference]
+    ) -> DataflowRef:
+        """Resolves a dataflow reference to a DataflowRef.
+
+        This mirrors the SDMX-JSON behaviour, which always emits a
+        ``DataflowRef``. If the referenced dataflow is present in the
+        message, the resolved flow's name is carried over; otherwise a
+        lightweight ``DataflowRef`` (without a name) is built.
+        """
+        urn = f"Dataflow={source.agency}:{source.id}({source.version})"
+        if urn in self.dataflows:
+            flow = self.dataflows[urn]
+            agency = (
+                flow.agency.id
+                if isinstance(flow.agency, Agency)
+                else flow.agency
+            )
+            return DataflowRef(
+                agency=agency,
+                id=flow.id,
+                version=flow.version,
+                name=flow.name,
+            )
+        return DataflowRef(
+            agency=source.agency,
+            id=source.id,
+            version=source.version,
+        )

@@ -617,7 +617,11 @@ def test_write_representation_map_datatype_tags(tmpdir, format):
 
 
 def test_write_maps_xml_json_roundtrip(tmpdir):
-    from pysdmx.model import DataType, RepresentationMap
+    from pysdmx.model import (
+        DataType,
+        MultiRepresentationMap,
+        RepresentationMap,
+    )
 
     data_path = Path(__file__).parent / "samples" / "maps.xml"
     from_xml = read_sdmx(data_path, validate=True)
@@ -634,7 +638,8 @@ def test_write_maps_xml_json_roundtrip(tmpdir):
         return next(
             s
             for s in structures
-            if isinstance(s, RepresentationMap) and s.id == rm_id
+            if isinstance(s, (RepresentationMap, MultiRepresentationMap))
+            and s.id == rm_id
         )
 
     # Codelist-based RepresentationMap round-trips correctly
@@ -651,3 +656,175 @@ def test_write_maps_xml_json_roundtrip(tmpdir):
     assert xml_dt.source == json_dt.source
     assert xml_dt.target == json_dt.target
     assert xml_dt.maps == json_dt.maps
+
+    # MultiRepresentationMap (N-N) round-trips correctly
+    xml_nn = find_rm(from_xml.structures, "REPMAP_NN")
+    json_nn = find_rm(from_json.structures, "REPMAP_NN")
+    assert isinstance(xml_nn, MultiRepresentationMap)
+    assert isinstance(json_nn, MultiRepresentationMap)
+    assert list(xml_nn.source) == list(json_nn.source)
+    assert list(xml_nn.target) == list(json_nn.target)
+    assert xml_nn.maps == json_nn.maps
+
+
+@pytest.mark.parametrize(
+    "format",
+    [
+        Format.STRUCTURE_SDMX_ML_3_0,
+        Format.STRUCTURE_SDMX_ML_3_1,
+    ],
+)
+def test_write_multi_datatype_representation_map(tmpdir, format):
+    from pysdmx.model import DataType, MultiRepresentationMap
+
+    data_path = Path(__file__).parent / "samples" / "maps_datatype_multi.xml"
+    reference = read_sdmx(data_path, validate=True)
+
+    out_path = tmpdir / "maps_dt_written.xml"
+    write_sdmx(
+        reference.structures,
+        sdmx_format=format,
+        output_path=out_path,
+        header=reference.header,
+    )
+    written = read_sdmx(out_path, validate=True)
+
+    assert reference == written
+    rep_map = written.structures[0]
+    assert isinstance(rep_map, MultiRepresentationMap)
+    assert list(rep_map.source) == [DataType.STRING, DataType.INTEGER]
+    assert list(rep_map.target) == [DataType.STRING, DataType.INTEGER]
+
+    xml_content = out_path.read_text("utf-8")
+    assert xml_content.count("<str:SourceDataType>") == 2
+    assert xml_content.count("<str:TargetDataType>") == 2
+
+
+@pytest.mark.parametrize(
+    "sdmx_format",
+    [
+        Format.STRUCTURE_SDMX_ML_2_1,
+        Format.STRUCTURE_SDMX_ML_3_0,
+        Format.STRUCTURE_SDMX_ML_3_1,
+    ],
+)
+def test_categorisation_full_urn_json_to_xml_roundtrip(tmpdir, sdmx_format):
+    # A categorisation read from SDMX-JSON stores full URNs in its
+    # Source/Target. Writing it to SDMX-ML (2.1/3.0/3.1) must produce
+    # valid documents and reading them back must preserve those full
+    # URNs, so the categorisation round-trips unchanged.
+    json_path = JSN_2_0_PATH / "cat" / "categorisation.json"
+    from_json = read_sdmx(json_path)
+    json_cats = from_json.get_categorisations()
+    assert json_cats[0].source == (
+        "urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dataflow=TEST:TEST_FACETS_FLOW(1.0)"
+    )
+    assert json_cats[0].target == (
+        "urn:sdmx:org.sdmx.infomodel.categoryscheme."
+        "Category=TEST:TEST_CS(1.0).TWO.TWO_KID"
+    )
+
+    out_path = Path(str(tmpdir)) / "categorisation.xml"
+    write_sdmx(json_cats, sdmx_format=sdmx_format, output_path=str(out_path))
+
+    from_xml = read_sdmx(out_path, validate=True)
+    assert from_json.get_categorisations() == from_xml.get_categorisations()
+
+
+@pytest.mark.parametrize(
+    "sdmx_format",
+    [
+        Format.STRUCTURE_SDMX_ML_2_1,
+        Format.STRUCTURE_SDMX_ML_3_0,
+        Format.STRUCTURE_SDMX_ML_3_1,
+    ],
+)
+def test_json_agency_scheme_roundtrip_uses_local_ids(sdmx_format):
+    # An AgencyScheme owned by "BIS" stores its sub-agency ids as
+    # "BIS.DST"/"BIS.CMP" in the model (mirroring the SDMX-JSON reader),
+    # but SDMX-ML must serialize the local ids ("DST"/"CMP") to satisfy
+    # the SDMX id pattern. Reading the file back must reconstruct the
+    # owner-prefixed ids so the round-trip reproduces the JSON model.
+    # This lives here (not under tests/io/xml/) because reading SDMX-JSON
+    # pulls in the json extra, so it must run with all extras installed.
+    jp = read_sdmx(JSN_2_0_PATH / "orgs" / "agencies.json")
+    result = write_sdmx(jp.get_agency_schemes(), sdmx_format)
+
+    assert 'id="DST"' in result
+    assert 'id="CMP"' in result
+    assert 'id="BIS.DST"' not in result
+    assert 'id="BIS.CMP"' not in result
+
+    xp = read_sdmx(result, validate=True)
+    assert jp.get_agency_schemes() == xp.get_agency_schemes()
+
+
+@pytest.mark.parametrize(
+    "sdmx_format",
+    [
+        Format.STRUCTURE_SDMX_ML_2_1,
+        Format.STRUCTURE_SDMX_ML_3_0,
+        Format.STRUCTURE_SDMX_ML_3_1,
+    ],
+)
+def test_category_scheme_json_to_xml_roundtrip(tmpdir, sdmx_format):
+    # A category scheme read from SDMX-JSON must round-trip through
+    # SDMX-ML (2.1/3.0/3.1) unchanged. The SDMX-JSON reader must build
+    # the category containers (items, sub-categories, annotations) as
+    # tuples -- the model default that the SDMX-ML reader also uses --
+    # so the re-read scheme compares equal to the original.
+    json_path = JSN_2_0_PATH / "cat" / "cs.json"
+    from_json = read_sdmx(json_path)
+
+    out_path = Path(str(tmpdir)) / "cs.xml"
+    write_sdmx(
+        from_json.get_category_schemes(),
+        sdmx_format=sdmx_format,
+        output_path=str(out_path),
+    )
+
+    from_xml = read_sdmx(out_path, validate=True)
+    assert from_json.get_category_schemes() == from_xml.get_category_schemes()
+
+
+@pytest.mark.parametrize(
+    "sdmx_format",
+    [
+        Format.STRUCTURE_SDMX_ML_2_1,
+        Format.STRUCTURE_SDMX_ML_3_0,
+        Format.STRUCTURE_SDMX_ML_3_1,
+    ],
+)
+def test_json_data_provider_scheme_roundtrip(sdmx_format):
+    # A DataProviderScheme read from SDMX-JSON must survive a
+    # JSON -> SDMX-ML -> read round-trip unchanged. Regression test for the
+    # scheme-level annotations being read as a list from SDMX-JSON but a
+    # tuple from SDMX-ML, which broke equality (see PR #629 review).
+    jp = read_sdmx(JSN_2_0_PATH / "orgs" / "providers.json")
+    result = write_sdmx(jp.get_data_provider_schemes(), sdmx_format)
+
+    xp = read_sdmx(result, validate=True)
+    assert jp.get_data_provider_schemes() == xp.get_data_provider_schemes()
+
+
+@pytest.mark.parametrize(
+    "sdmx_format",
+    [
+        Format.STRUCTURE_SDMX_ML_3_0,
+        Format.STRUCTURE_SDMX_ML_3_1,
+    ],
+)
+def test_json_metadata_provider_scheme_roundtrip(sdmx_format):
+    # MetadataProviderScheme is absent from the SDMX-ML 2.1
+    # OrganisationSchemes content model, so the round-trip is only
+    # exercised for 3.0/3.1. Same scheme-level annotations regression as
+    # the data provider scheme above.
+    jp = read_sdmx(JSN_2_0_PATH / "orgs" / "metadata_providers.json")
+    result = write_sdmx(jp.get_metadata_provider_schemes(), sdmx_format)
+
+    xp = read_sdmx(result, validate=True)
+    assert (
+        jp.get_metadata_provider_schemes()
+        == xp.get_metadata_provider_schemes()
+    )

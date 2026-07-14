@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from pysdmx.errors import Invalid
 from pysdmx.io import write_sdmx
 from pysdmx.io.format import Format
 from pysdmx.io.reader import read_sdmx as read_sdmx
@@ -11,6 +12,9 @@ from pysdmx.io.xml.sdmx31.writer.structure import write
 from pysdmx.model import (
     Agency,
     AgencyScheme,
+    Categorisation,
+    Category,
+    CategoryScheme,
     Code,
     Codelist,
     Concept,
@@ -18,6 +22,10 @@ from pysdmx.model import (
     DataType,
     Facets,
     FromVtlMapping,
+    HierarchicalCode,
+    Hierarchy,
+    HierarchyAssociation,
+    LevelType,
     Ruleset,
     RulesetScheme,
     ToVtlMapping,
@@ -635,6 +643,168 @@ def test_codelist(complete_header, codelist, codelist_sample):
     assert result == codelist_sample
 
 
+@pytest.fixture
+def hierarchy_with_levels():
+    return Hierarchy(
+        id="H1",
+        name="Hierarchy 1",
+        agency="BIS",
+        version="1.0",
+        has_formal_levels=True,
+        level=LevelType(
+            id="0",
+            name="Division",
+            level=LevelType(id="1", name="Group"),
+        ),
+        codes=(
+            HierarchicalCode(
+                id="A",
+                urn=(
+                    "urn:sdmx:org.sdmx.infomodel.codelist."
+                    "Code=BIS:CL_FREQ(1.0).A"
+                ),
+                level="1",
+                codes=(
+                    HierarchicalCode(
+                        id="A1",
+                        urn=(
+                            "urn:sdmx:org.sdmx.infomodel.codelist."
+                            "Code=BIS:CL_FREQ(1.0).M"
+                        ),
+                    ),
+                ),
+            ),
+            HierarchicalCode(
+                id="B",
+                urn=(
+                    "urn:sdmx:org.sdmx.infomodel.codelist."
+                    "Code=BIS:CL_FREQ(1.0).Q"
+                ),
+            ),
+        ),
+    )
+
+
+def test_hierarchy(complete_header, hierarchy_with_levels):
+    result = write(
+        [hierarchy_with_levels], header=complete_header, prettyprint=True
+    )
+    assert "<str:Hierarchies>" in result
+    assert 'hasFormalLevels="true"' in result
+    assert '<str:Level id="0">' in result
+    assert '<str:Level id="1">' in result
+    re_read = read_sdmx(result, validate=True).structures[0]
+    assert re_read == hierarchy_with_levels
+
+
+def test_hierarchy_with_annotations(complete_header):
+    hierarchy = Hierarchy(
+        id="H1",
+        name="Hierarchy 1",
+        agency="BIS",
+        version="1.0",
+        has_formal_levels=True,
+        level=LevelType(
+            id="0",
+            name="Division",
+            annotations=(Annotation(id="LA", title="Level annotation"),),
+        ),
+        codes=(
+            HierarchicalCode(
+                id="A",
+                urn=(
+                    "urn:sdmx:org.sdmx.infomodel.codelist."
+                    "Code=BIS:CL_FREQ(1.0).A"
+                ),
+                annotations=(Annotation(id="CA", text="Code annotation"),),
+            ),
+        ),
+    )
+    result = write([hierarchy], header=complete_header, prettyprint=True)
+    re_read = read_sdmx(result, validate=True).structures[0]
+    assert re_read == hierarchy
+
+
+def test_hierarchy_association(complete_header):
+    ha = HierarchyAssociation(
+        id="HA1",
+        name="Association 1",
+        agency="BIS",
+        version="1.0",
+        hierarchy=Hierarchy(id="H1", name="H", agency="BIS", version="1.0"),
+        component_ref=(
+            "urn:sdmx:org.sdmx.infomodel.datastructure."
+            "Dimension=BIS:DSD(1.0).FREQ"
+        ),
+        context_ref=(
+            "urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow=BIS:DF(1.0)"
+        ),
+    )
+    result = write([ha], header=complete_header, prettyprint=True)
+    assert "<str:HierarchyAssociations>" in result
+    assert (
+        "<str:LinkedHierarchy>"
+        "urn:sdmx:org.sdmx.infomodel.codelist.Hierarchy=BIS:H1(1.0)"
+        "</str:LinkedHierarchy>" in result
+    )
+    re_read = read_sdmx(result, validate=True).structures[0]
+    assert isinstance(re_read, HierarchyAssociation)
+    assert (
+        re_read.hierarchy
+        == "urn:sdmx:org.sdmx.infomodel.codelist.Hierarchy=BIS:H1(1.0)"
+    )
+
+
+def test_hierarchy_association_no_hierarchy(complete_header):
+    ha = HierarchyAssociation(
+        id="HA1",
+        name="Association 1",
+        agency="BIS",
+        version="1.0",
+        component_ref="urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dimension=BIS:DSD(1.0).FREQ",
+    )
+    with pytest.raises(Invalid, match="must reference a hierarchy"):
+        write([ha], header=complete_header, prettyprint=True)
+
+
+def test_hierarchy_association_no_component(complete_header):
+    ha = HierarchyAssociation(
+        id="HA1",
+        name="Association 1",
+        agency="BIS",
+        version="1.0",
+        hierarchy="urn:sdmx:org.sdmx.infomodel.codelist.Hierarchy=BIS:H1(1.0)",
+    )
+    with pytest.raises(Invalid, match="must reference a component"):
+        write([ha], header=complete_header, prettyprint=True)
+
+
+def test_hierarchy_level_no_name(complete_header):
+    hierarchy = Hierarchy(
+        id="H1",
+        name="H",
+        agency="BIS",
+        version="1.0",
+        has_formal_levels=True,
+        level=LevelType(id="0"),
+    )
+    with pytest.raises(Invalid, match="hierarchy levels must have a name"):
+        write([hierarchy], header=complete_header, prettyprint=True)
+
+
+def test_hierarchy_code_no_urn(complete_header):
+    hierarchy = Hierarchy(
+        id="H1",
+        name="H",
+        agency="BIS",
+        version="1.0",
+        codes=[HierarchicalCode(id="A")],
+    )
+    with pytest.raises(Invalid, match="must reference a code urn"):
+        write([hierarchy], header=complete_header, prettyprint=True)
+
+
 def test_concept(complete_header, concept, concept_sample):
     content = [concept]
     result = write(
@@ -756,3 +926,145 @@ def test_write_group_without_urn(datastructure):
     )
     assert expected_urn in result
     read_sdmx(result, validate=True)
+
+
+@pytest.fixture
+def category_scheme_nested_31():
+    return CategoryScheme(
+        id="CS1",
+        name="Category Scheme 1",
+        description="A scheme",
+        agency="BIS",
+        version="1.0.0",
+        is_final=True,
+        items=(
+            Category(
+                id="TOP",
+                name="Top",
+                categories=(
+                    Category(
+                        id="MID",
+                        name="Middle",
+                        categories=(Category(id="LEAF", name="Leaf"),),
+                    ),
+                ),
+            ),
+            Category(id="OTHER", name="Other"),
+        ),
+    )
+
+
+def test_category_scheme_31_round_trip(
+    complete_header, category_scheme_nested_31
+):
+    result = write(
+        [category_scheme_nested_31], header=complete_header, prettyprint=True
+    )
+    assert "<str:CategorySchemes>" in result
+    re_read = read_sdmx(result, validate=True).structures[0]
+    assert re_read == category_scheme_nested_31
+
+
+def test_category_scheme_31_name_with_apostrophe(complete_header):
+    cs = CategoryScheme(
+        id="CS2",
+        name="Schemes",
+        agency="BIS",
+        version="1.0.0",
+        is_final=True,
+        items=(Category(id="C", name="Côte d'Ivoire"),),
+    )
+    result = write([cs], header=complete_header, prettyprint=True)
+    re_read = read_sdmx(result, validate=True).structures[0]
+    assert re_read == cs
+    assert re_read.items[0].name == "Côte d'Ivoire"
+
+
+def test_categorisation_31_round_trip(complete_header):
+    # In SDMX-ML 3.1 the Categorisation version attribute is prohibited,
+    # so the model default version ("1.0") must round-trip unchanged.
+    categorisation = Categorisation(
+        id="CAT1",
+        name="Categorisation 1",
+        agency="BIS",
+        source=(
+            "urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow=BIS:DF1(1.0.0)"
+        ),
+        target=(
+            "urn:sdmx:org.sdmx.infomodel.categoryscheme."
+            "Category=BIS:CS1(1.0.0).TOP.MID.LEAF"
+        ),
+    )
+    result = write([categorisation], header=complete_header, prettyprint=True)
+    assert "<str:Categorisations>" in result
+    assert (
+        "version=" not in result.split("<str:Categorisation ")[1].split(">")[0]
+    )
+    re_read = read_sdmx(result, validate=True).structures[0]
+    # Full URNs round-trip unchanged.
+    assert re_read == categorisation
+
+
+def test_categorisation_31_codelist_source_round_trip(complete_header):
+    # A non-Dataflow (Codelist) source must round-trip via the 3.1
+    # reference-as-URN form.
+    categorisation = Categorisation(
+        id="CAT2",
+        name="Categorisation 2",
+        agency="BIS",
+        source=(
+            "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=BIS:CL_FREQ(1.0.0)"
+        ),
+        target=(
+            "urn:sdmx:org.sdmx.infomodel.categoryscheme."
+            "Category=BIS:CS1(1.0.0).OTHER"
+        ),
+    )
+    result = write([categorisation], header=complete_header, prettyprint=True)
+    assert "codelist.Codelist=BIS:CL_FREQ(1.0.0)" in result
+    re_read = read_sdmx(result, validate=True).structures[0]
+    assert re_read == categorisation
+
+
+def test_category_scheme_31_enrichment_round_trip(complete_header):
+    cs = CategoryScheme(
+        id="CS1",
+        name="Category Scheme 1",
+        agency="BIS",
+        version="1.0.0",
+        is_final=True,
+        items=(Category(id="TOP", name="Top"),),
+    )
+    dataflow = Dataflow(
+        id="DF1",
+        name="Dataflow 1",
+        agency="BIS",
+        version="1.0.0",
+        structure="DataStructure=BIS:DSD1(1.0.0)",
+    )
+    categorisation = Categorisation(
+        id="CAT1",
+        name="Categorisation 1",
+        agency="BIS",
+        source=(
+            "urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow=BIS:DF1(1.0.0)"
+        ),
+        target=(
+            "urn:sdmx:org.sdmx.infomodel.categoryscheme."
+            "Category=BIS:CS1(1.0.0).TOP"
+        ),
+    )
+    result = write(
+        [cs, dataflow, categorisation],
+        header=complete_header,
+        prettyprint=True,
+    )
+    re_read = read_sdmx(result, validate=True).structures
+    re_cs = next(s for s in re_read if isinstance(s, CategoryScheme))
+    top = re_cs["TOP"]
+    assert len(top.dataflows) == 1
+    assert isinstance(top.dataflows[0], DataflowRef)
+    assert top.dataflows[0].agency == "BIS"
+    assert top.dataflows[0].id == "DF1"
+    assert top.dataflows[0].version == "1.0.0"
+    assert top.dataflows[0].name == "Dataflow 1"
