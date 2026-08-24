@@ -22,6 +22,12 @@ from pysdmx.model.__base import (
     Organisation,
     Reference,
 )
+from pysdmx.model._validation import (
+    ValidationError,
+    ValidationIssue,
+    validate,
+    validate_many,
+)
 from pysdmx.model.category import Categorisation, Category, CategoryScheme
 from pysdmx.model.code import (
     Code,
@@ -232,6 +238,8 @@ __all__ = [
     "TransformationScheme",
     "UserDefinedOperator",
     "UserDefinedOperatorScheme",
+    "ValidationError",
+    "ValidationIssue",
     "ValueMap",
     "VtlCodelistMapping",
     "VtlConceptMapping",
@@ -239,4 +247,6 @@ __all__ = [
     "VtlScheme",
     "VtlMapping",
     "VtlMappingScheme",
+    "validate",
+    "validate_many",
 ]
