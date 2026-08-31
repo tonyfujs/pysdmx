@@ -21,6 +21,7 @@ Your opinionated Python SDMX library.
    howto/map
    howto/config
    howto/maintenance
+   howto/fmr_api
 
 .. toctree::
    :maxdepth: 1
