@@ -1,13 +1,13 @@
 import copy
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from msgspec.structs import replace
 
 from pysdmx.errors import Invalid, NotImplemented
-from pysdmx.io import read_sdmx
+from pysdmx.io import read_sdmx, write_sdmx
 from pysdmx.io.format import Format
 from pysdmx.io.input_processor import process_string_to_read
 from pysdmx.io.xml.__tokens import CON
@@ -17,6 +17,7 @@ from pysdmx.io.xml.sdmx21.writer.structure import write
 from pysdmx.model import (
     Agency,
     AgencyScheme,
+    AvailabilityConstraint,
     Categorisation,
     Category,
     CategoryScheme,
@@ -28,6 +29,7 @@ from pysdmx.model import (
     Contact,
     CubeKeyValue,
     CubeRegion,
+    CubeTimeRange,
     CubeValue,
     CustomTypeScheme,
     DataConstraint,
@@ -51,6 +53,7 @@ from pysdmx.model import (
     NamePersonalisationScheme,
     Ruleset,
     RulesetScheme,
+    TimePeriodBoundary,
     ToVtlMapping,
     Transformation,
     TransformationScheme,
@@ -356,8 +359,8 @@ def test_hierarchy_21_metadata_round_trip(complete_header):
         description="My description",
         agency="BIS",
         version="1.0",
-        valid_from=datetime(2021, 1, 1),
-        valid_to=datetime(2021, 12, 31),
+        valid_from=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        valid_to=datetime(2021, 12, 31, tzinfo=timezone.utc),
         annotations=(Annotation(id="AN1", title="anno"),),
         codes=(
             HierarchicalCode(
@@ -687,8 +690,8 @@ def codelist():
         ],
         agency="BIS",
         version="1.0",
-        valid_from=datetime.strptime("2021-01-01", "%Y-%m-%d"),
-        valid_to=datetime.strptime("2021-12-31", "%Y-%m-%d"),
+        valid_from=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        valid_to=datetime(2021, 12, 31, tzinfo=timezone.utc),
     )
 
 
@@ -704,8 +707,8 @@ def noname_codelist():
         ],
         agency="MD",
         version="1.0",
-        valid_from=datetime.strptime("2021-01-01", "%Y-%m-%d"),
-        valid_to=datetime.strptime("2021-12-31", "%Y-%m-%d"),
+        valid_from=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        valid_to=datetime(2021, 12, 31, tzinfo=timezone.utc),
     )
 
 
@@ -1163,8 +1166,8 @@ def dataflow():
         uri=None,
         urn="urn:sdmx:org.sdmx.infomodel.datastructure."
         "Dataflow=BIS:WEBSTATS_DER_DATAFLOW(1.0)",
-        valid_from=datetime.strptime("2021-01-01", "%Y-%m-%d"),
-        valid_to=datetime.strptime("2021-12-31", "%Y-%m-%d"),
+        valid_from=datetime(2021, 1, 1, tzinfo=timezone.utc),
+        valid_to=datetime(2021, 12, 31, tzinfo=timezone.utc),
         version="1.0",
     )
 
@@ -1655,8 +1658,8 @@ def test_writer_dataflow_without_structure(complete_header, dataflow):
         'urn="urn:sdmx:org.sdmx.infomodel.datastructure.'
         'Dataflow=BIS:WEBSTATS_DER_DATAFLOW(1.0)" '
         'version="1.0" '
-        'validFrom="2021-01-01T00:00:00" '
-        'validTo="2021-12-31T00:00:00" '
+        'validFrom="2021-01-01T00:00:00Z" '
+        'validTo="2021-12-31T00:00:00Z" '
         'isExternalReference="true" '
         'isFinal="true" '
         'agencyID="BIS">'
@@ -2175,6 +2178,220 @@ def test_constraint_without_attachment(
     )
     read(result, validate=True)
     assert result == constraint_no_attachment_sample
+
+
+def test_availability_constraint_roundtrip_21(complete_header):
+    urn = (
+        "urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dataflow=TEST_AGENCY:DF_TEST(1.0)"
+    )
+    ac = AvailabilityConstraint(
+        constraint_attachment=ConstraintAttachment(
+            data_provider=None, dataflows=[urn]
+        ),
+        cube_region=CubeRegion(
+            key_values=[CubeKeyValue(id="FREQ", values=[CubeValue(value="M")])]
+        ),
+        series_count=3,
+        obs_count=42,
+    )
+    out = write([ac], prettyprint=True, header=complete_header)
+    assert 'type="Actual"' in out
+    assert 'id="DF_TEST"' in out
+    assert 'agencyID="TEST_AGENCY"' in out
+    assert "Availability for DF_TEST" in out
+    # The counts have no dedicated element in SDMX-ML 2.1, so they are
+    # carried as FMR-style sdmx_metrics annotations.
+    assert '<com:Annotation id="series_count">' in out
+    assert "<com:AnnotationType>sdmx_metrics</com:AnnotationType>" in out
+    assert "<com:AnnotationTitle>3</com:AnnotationTitle>" in out
+    assert '<com:Annotation id="obs_count">' in out
+    assert "<com:AnnotationTitle>42</com:AnnotationTitle>" in out
+    back = read_sdmx(out, validate=True).structures
+    assert len(back) == 1
+    assert isinstance(back[0], AvailabilityConstraint)
+    assert back[0].constraint_attachment == ac.constraint_attachment
+    kv = back[0].cube_region.key_values[0]
+    assert kv.id == "FREQ"
+    assert [v.value for v in kv.values] == ["M"]
+    # The counts now survive the legacy round trip via the annotations,
+    # which are lifted back and excluded from back[0].annotations.
+    assert back[0].series_count == 3
+    assert back[0].obs_count == 42
+    assert back[0].annotations == ()
+
+
+def test_availability_constraint_21_ignores_bad_metric_title(
+    complete_header,
+):
+    urn = (
+        "urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dataflow=TEST_AGENCY:DF_TEST(1.0)"
+    )
+    ac = AvailabilityConstraint(
+        constraint_attachment=ConstraintAttachment(
+            data_provider=None, dataflows=[urn]
+        ),
+        cube_region=CubeRegion(
+            key_values=[CubeKeyValue(id="FREQ", values=[CubeValue(value="M")])]
+        ),
+        series_count=3,
+    )
+    out = write([ac], prettyprint=True, header=complete_header)
+    # Corrupt the emitted count so it can no longer be parsed as an
+    # int: a non-numeric title cannot be a genuine count, so the
+    # annotation must be kept as-is instead of being lifted (and no
+    # exception raised for it).
+    corrupted = out.replace(
+        "<com:AnnotationTitle>3</com:AnnotationTitle>",
+        "<com:AnnotationTitle>not-a-number</com:AnnotationTitle>",
+    )
+    back = read_sdmx(corrupted, validate=True).structures
+    assert back[0].series_count is None
+    assert len(back[0].annotations) == 1
+    assert back[0].annotations[0].id == "series_count"
+    assert back[0].annotations[0].title == "not-a-number"
+
+
+def test_availability_constraint_21_ignores_unicode_digit_title(
+    complete_header,
+):
+    # str.isdigit() returns True for characters such as the
+    # superscript two ("²") that int() still cannot parse; the guard
+    # must not crash on those either.
+    urn = (
+        "urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dataflow=TEST_AGENCY:DF_TEST(1.0)"
+    )
+    ac = AvailabilityConstraint(
+        constraint_attachment=ConstraintAttachment(
+            data_provider=None, dataflows=[urn]
+        ),
+        cube_region=CubeRegion(
+            key_values=[CubeKeyValue(id="FREQ", values=[CubeValue(value="M")])]
+        ),
+        series_count=3,
+    )
+    out = write([ac], prettyprint=True, header=complete_header)
+    corrupted = out.replace(
+        "<com:AnnotationTitle>3</com:AnnotationTitle>",
+        "<com:AnnotationTitle>²</com:AnnotationTitle>",
+    )
+    back = read_sdmx(corrupted, validate=True).structures
+    assert back[0].series_count is None
+    assert back[0].annotations[0].title == "²"
+
+
+def test_availability_constraint_21_ignores_unknown_metric_id(
+    complete_header,
+):
+    urn = (
+        "urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dataflow=TEST_AGENCY:DF_TEST(1.0)"
+    )
+    ac = AvailabilityConstraint(
+        constraint_attachment=ConstraintAttachment(
+            data_provider=None, dataflows=[urn]
+        ),
+        cube_region=CubeRegion(
+            key_values=[CubeKeyValue(id="FREQ", values=[CubeValue(value="M")])]
+        ),
+        series_count=3,
+    )
+    out = write([ac], prettyprint=True, header=complete_header)
+    # type="sdmx_metrics" alone isn't enough: an id other than
+    # series_count/obs_count is not a genuine count, so the
+    # annotation must be kept as-is instead of being lifted.
+    corrupted = out.replace(
+        '<com:Annotation id="series_count">',
+        '<com:Annotation id="foo">',
+    )
+    back = read_sdmx(corrupted, validate=True).structures
+    assert back[0].series_count is None
+    assert back[0].obs_count is None
+    assert len(back[0].annotations) == 1
+    assert back[0].annotations[0].id == "foo"
+    assert back[0].annotations[0].type == "sdmx_metrics"
+
+
+def test_availability_constraint_21_no_counts_writes_no_metrics(
+    complete_header,
+):
+    urn = (
+        "urn:sdmx:org.sdmx.infomodel.datastructure."
+        "Dataflow=TEST_AGENCY:DF_TEST(1.0)"
+    )
+    ac = AvailabilityConstraint(
+        constraint_attachment=ConstraintAttachment(
+            data_provider=None, dataflows=[urn]
+        ),
+        cube_region=CubeRegion(key_values=[]),
+    )
+    out = write([ac], prettyprint=True, header=complete_header)
+    # Neither count is set: no sdmx_metrics annotation (and no
+    # Annotations element at all) should be emitted.
+    assert "sdmx_metrics" not in out
+    assert "<com:Annotations>" not in out
+    back = read_sdmx(out, validate=True).structures
+    assert back[0].series_count is None
+    assert back[0].obs_count is None
+    assert back[0].annotations == ()
+
+
+def test_constraint_time_range_roundtrip_21():
+    dc = DataConstraint(
+        id="TR",
+        name="tr",
+        agency="AG",
+        version="1.0",
+        cube_regions=[
+            CubeRegion(
+                key_values=[
+                    CubeKeyValue(
+                        id="TIME_PERIOD",
+                        time_range=CubeTimeRange(
+                            start_period=TimePeriodBoundary("2020", True),
+                            end_period=TimePeriodBoundary("2024", False),
+                        ),
+                    )
+                ]
+            )
+        ],
+    )
+    out = write_sdmx(dc, Format.STRUCTURE_SDMX_ML_2_1, prettyprint=True)
+    assert "<com:TimeRange>" in out
+    assert "<com:StartPeriod " in out
+    kv = read_sdmx(out).get_data_constraints()[0].cube_regions[0].key_values[0]
+    assert kv.time_range.start_period.period == "2020"
+    assert kv.time_range.start_period.is_inclusive is True
+    assert kv.time_range.end_period.is_inclusive is False
+
+
+def test_constraint_keyvalue_validity_omitted_21():
+    dc = DataConstraint(
+        id="KV",
+        name="kv",
+        agency="AG",
+        version="1.0",
+        cube_regions=[
+            CubeRegion(
+                key_values=[
+                    CubeKeyValue(
+                        id="FREQ",
+                        values=[CubeValue(value="A")],
+                        valid_from=datetime(2020, 1, 1, tzinfo=timezone.utc),
+                        valid_to=datetime(2021, 1, 1, tzinfo=timezone.utc),
+                    )
+                ]
+            )
+        ],
+    )
+    out = write_sdmx(dc, Format.STRUCTURE_SDMX_ML_2_1, prettyprint=True)
+    assert "validFrom" not in out
+    assert "validTo" not in out
+    kv = read_sdmx(out).get_data_constraints()[0].cube_regions[0].key_values[0]
+    assert kv.valid_from is None
+    assert kv.valid_to is None
 
 
 def test_write_group_without_urn(complete_header, datastructure):
