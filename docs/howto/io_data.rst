@@ -48,6 +48,35 @@ A typical example to read data or metadata from a file, a string or a URL, using
 By default, the :meth:`pysdmx.io.read_sdmx` function will automatically detect the
 format of the file and use the appropriate reader.
 
+SDMX-ML and SDMX-CSV data messages are read in a single pass while they
+are read from the file or downloaded: the message is never held in memory
+as a whole, so the memory used depends on the size of the resulting
+DataFrames, not on the size of the message. The validation of SDMX-ML
+data messages against the XSD (``validate=True``) happens in the same
+pass.
+
+A message compressed with gzip, such as a ``.gz`` file or a response of
+Eurostat's SDMX API, is detected from its first bytes and decompressed
+while it is read, so it is read in a single pass as well.
+
+When reading from a URL, the ``timeout`` argument sets the seconds to wait
+for each network operation, such as the server starting to send the message
+(600 seconds by default). It does not limit the whole download. If the
+server has not started to send the message after 60 seconds, a
+``UserWarning`` is emitted, and another one every 10 seconds while it keeps
+waiting, so that a long wait is not silent.
+
+.. code-block:: python
+
+    # Wait up to 20 minutes for the server to start sending the message
+    message = read_sdmx("https://example.com/large_sample.xml", timeout=1200)
+
+Eurostat's SDMX API queues a data query that is too large to be answered at
+once as an asynchronous extraction: instead of the data, it answers with the
+id of the extraction. ``read_sdmx`` follows the extraction: it checks its
+status every 10 seconds, with the warnings above while it waits, until it is
+available or the ``timeout`` has passed, and then reads its data.
+
 The output is always a Message object, which holds the Datasets at the `data` attribute.
 
 .. code-block:: python

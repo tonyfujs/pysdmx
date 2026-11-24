@@ -14,7 +14,9 @@ from msgspec.json import decode
 
 from pysdmx.api.qb import (
     ApiVersion,
+    AsyncLenientRestService,
     AsyncRestService,
+    LenientRestService,
     RefMetaByMetadatasetQuery,
     RefMetaByStructureQuery,
     RestService,
@@ -36,6 +38,7 @@ from pysdmx.model import (
     CategoryScheme,
     Codelist,
     ConceptScheme,
+    DataConstraint,
     Dataflow,
     DataflowInfo,
     DataProvider,
@@ -268,6 +271,13 @@ class __BaseRegistryClient:
     ) -> StructureQuery:
         return StructureQuery(StructureType.DATAFLOW, agency, id, version)
 
+    def _data_constraint_q(
+        self, agency: str, id: str, version: str
+    ) -> StructureQuery:
+        return StructureQuery(
+            StructureType.DATA_CONSTRAINT, agency, id, version
+        )
+
     def _vtl_ts_q(self, agency: str, id: str, version: str) -> StructureQuery:
         return StructureQuery(
             StructureType.TRANSFORMATION_SCHEME,
@@ -335,6 +345,7 @@ class RegistryClient(__BaseRegistryClient):
         format: StructureFormat = StructureFormat.SDMX_JSON_2_0_0,
         pem: Optional[str] = None,
         timeout: float = 10.0,
+        lenient: bool = False,
     ):
         """Instantiate a new client against the target endpoint.
 
@@ -348,9 +359,16 @@ class RegistryClient(__BaseRegistryClient):
             timeout: The maximum number of seconds to wait before
                 considering that a request timed out. Defaults to
                 10 seconds.
+            lenient: Whether to use the
+                :class:`~pysdmx.api.qb.LenientRestService`, which accepts
+                some deviations from the SDMX-REST specification (e.g.
+                gzip-compressed responses sent without a
+                ``Content-Encoding`` header), instead of the strict
+                :class:`~pysdmx.api.qb.RestService`. Defaults to ``False``.
         """
         super().__init__(api_endpoint, format)
-        self.__service = RestService(
+        service = LenientRestService if lenient else RestService
+        self.__service = service(
             self.api_endpoint,
             API_VERSION,
             structure_format=format,
@@ -676,6 +694,27 @@ class RegistryClient(__BaseRegistryClient):
         out = self.__fetch(query)
         return super()._out(out, self.deser.dataflows)
 
+    def get_data_constraint(
+        self,
+        agency: str,
+        id: str,
+        version: str = "~",
+    ) -> DataConstraint:
+        """Get one data constraint.
+
+        Args:
+            agency: The agency maintaining the data constraint.
+            id: The ID of the data constraint to return.
+            version: The version of the data constraint to return. The most
+                recent version will be returned, unless specified otherwise.
+
+        Returns:
+            The requested data constraint.
+        """
+        query = super()._data_constraint_q(agency, id, version)
+        out = self.__fetch(query)
+        return super()._out(out, self.deser.data_constraint)[0]
+
     def get_data_structures(
         self,
         agency: str = "*",
@@ -903,6 +942,7 @@ class AsyncRegistryClient(__BaseRegistryClient):
         format: StructureFormat = StructureFormat.SDMX_JSON_2_0_0,
         pem: Optional[str] = None,
         timeout: float = 10.0,
+        lenient: bool = False,
     ):
         """Instantiate a new client against the target endpoint.
 
@@ -916,9 +956,17 @@ class AsyncRegistryClient(__BaseRegistryClient):
             timeout: The maximum number of seconds to wait before
                 considering that a request timed out. Defaults to
                 10 seconds.
+            lenient: Whether to use the
+                :class:`~pysdmx.api.qb.AsyncLenientRestService`, which accepts
+                some deviations from the SDMX-REST specification (e.g.
+                gzip-compressed responses sent without a
+                ``Content-Encoding`` header), instead of the strict
+                :class:`~pysdmx.api.qb.AsyncRestService`. Defaults to
+                ``False``.
         """
         super().__init__(api_endpoint, format)
-        self.__service = AsyncRestService(
+        service = AsyncLenientRestService if lenient else AsyncRestService
+        self.__service = service(
             self.api_endpoint,
             API_VERSION,
             structure_format=format,
@@ -1249,6 +1297,27 @@ class AsyncRegistryClient(__BaseRegistryClient):
         query = super()._dataflows_q(agency, id, version)
         out = await self.__fetch(query)
         return super()._out(out, self.deser.dataflows)
+
+    async def get_data_constraint(
+        self,
+        agency: str,
+        id: str,
+        version: str = "~",
+    ) -> DataConstraint:
+        """Get one data constraint.
+
+        Args:
+            agency: The agency maintaining the data constraint.
+            id: The ID of the data constraint to return.
+            version: The version of the data constraint to return. The most
+                recent version will be returned, unless specified otherwise.
+
+        Returns:
+            The requested data constraint.
+        """
+        query = super()._data_constraint_q(agency, id, version)
+        out = await self.__fetch(query)
+        return super()._out(out, self.deser.data_constraint)[0]
 
     async def get_data_structures(
         self,

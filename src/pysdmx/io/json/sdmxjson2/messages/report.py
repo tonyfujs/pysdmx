@@ -11,6 +11,8 @@ from pysdmx.io.json.sdmxjson2.messages.core import (
     JsonAnnotation,
     JsonHeader,
     JsonTextFormat,
+    _self_link,
+    _self_link_href,
     get_facets,
 )
 from pysdmx.model import Agency
@@ -39,7 +41,7 @@ class JsonMetadataAttribute(IdentifiableType, frozen=True, omit_defaults=True):
         return MetadataAttribute(
             id=self.id,
             value=self.value,
-            attributes=attrs,
+            attributes=tuple(attrs),
             annotations=tuple([a.to_model() for a in self.annotations]),
             format=get_facets(self.format) if self.format else None,
         )
@@ -87,6 +89,7 @@ class JsonMetadataReport(ItemSchemeType, frozen=True, omit_defaults=True):
             version=self.version,
             agency=self.agency,
             is_external_reference=self.isExternalReference,
+            structure_url=_self_link_href(self.links),
             metadataflow=self.metadataflow,
             targets=tuple(self.targets),
             attributes=tuple(attrs),
@@ -118,6 +121,7 @@ class JsonMetadataReport(ItemSchemeType, frozen=True, omit_defaults=True):
             name=report.name,
             version=report.version,
             isExternalReference=report.is_external_reference,
+            links=_self_link(report.structure_url),
             validFrom=ensure_tz_aware(report.valid_from),
             validTo=ensure_tz_aware(report.valid_to),
             description=report.description,
@@ -166,7 +170,7 @@ class JsonMetadataMessage(Struct, frozen=True, omit_defaults=True):
         """Returns the requested metadata report(s)."""
         header = self.meta.to_model()
         reports = self.data.to_model()
-        return MetadataMessage(header, reports)
+        return MetadataMessage(header, tuple(reports))
 
     @classmethod
     def from_model(

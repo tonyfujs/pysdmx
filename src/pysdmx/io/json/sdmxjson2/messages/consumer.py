@@ -7,6 +7,9 @@ from msgspec import Struct
 from pysdmx.io.json.sdmxjson2.messages.core import (
     ItemSchemeType,
     JsonAnnotation,
+    _self_link,
+    _self_link_href,
+    tuple_contacts,
 )
 from pysdmx.model import Agency, DataConsumer, DataConsumerScheme
 from pysdmx.util import ensure_tz_aware, is_final
@@ -24,7 +27,7 @@ class JsonDataConsumerScheme(ItemSchemeType, frozen=True, omit_defaults=True):
                 id=p.id,
                 name=p.name,
                 description=p.description,
-                contacts=p.contacts,
+                contacts=tuple_contacts(p.contacts),
                 annotations=tuple([a.to_model() for a in self.annotations]),
             )
             for p in self.dataConsumers
@@ -32,9 +35,10 @@ class JsonDataConsumerScheme(ItemSchemeType, frozen=True, omit_defaults=True):
         return DataConsumerScheme(
             agency=self.agency,
             description=self.description,
-            items=consumers,
+            items=tuple(consumers),
             annotations=tuple([a.to_model() for a in self.annotations]),
             is_external_reference=self.isExternalReference,
+            structure_url=_self_link_href(self.links),
             is_final=is_final(self.version),
             is_partial=self.isPartial,
             valid_from=ensure_tz_aware(self.validFrom),
@@ -57,6 +61,7 @@ class JsonDataConsumerScheme(ItemSchemeType, frozen=True, omit_defaults=True):
                 [JsonAnnotation.from_model(a) for a in dps.annotations]
             ),
             isExternalReference=dps.is_external_reference,
+            links=_self_link(dps.structure_url),
             isPartial=dps.is_partial,
             validFrom=ensure_tz_aware(dps.valid_from),
             validTo=ensure_tz_aware(dps.valid_to),

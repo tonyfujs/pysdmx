@@ -47,6 +47,7 @@ def codelist():
         agency="BIS",
         version="1.0",
         items=[code1, code2],
+        structure_url="https://example.test/codelist/BIS/CL_FREQ/1.0",
     )
 
 
@@ -92,6 +93,15 @@ def test_no_structures(header):
         errors.Invalid, match="structure messages must have structures"
     ):
         JsonStructureMessage.from_model(msg)
+
+
+def test_structure_url_round_trip(header, codelist):
+    output = write_v2_0([codelist], header=header)
+
+    message = read_sdmx(output, validate=True)
+    result = message.get_codelists()[0]
+
+    assert result.structure_url == codelist.structure_url
 
 
 @pytest.fixture
@@ -177,6 +187,29 @@ def test_availability_constraint_v2_1_writer(availability_constraint):
 
     assert len(constraints) == 1
     assert constraints[0] == availability_constraint
+
+
+def test_availability_constraint_v2_1_assigns_metrics_to_dataflow(
+    availability_constraint,
+):
+    dataflow = Dataflow(
+        id="DF_TEST",
+        name="Test dataflow",
+        agency="TEST_AGENCY",
+        version="1.0",
+        structure=(
+            "urn:sdmx:org.sdmx.infomodel.datastructure."
+            "DataStructure=TEST_AGENCY:DS_TEST(1.0)"
+        ),
+    )
+
+    out = write_v2_1([dataflow, availability_constraint])
+
+    result = read_sdmx(out, validate=True)
+    read_dataflow = result.get_dataflows()[0]
+
+    assert read_dataflow.series_count == availability_constraint.series_count
+    assert read_dataflow.obs_count == availability_constraint.obs_count
 
 
 def test_availability_constraint_v2_1_writer_with_annotation(

@@ -9,6 +9,8 @@ from pysdmx import errors
 from pysdmx.io.json.sdmxjson2.messages.core import (
     JsonAnnotation,
     MaintainableType,
+    _self_link,
+    _self_link_href,
 )
 from pysdmx.model import (
     Agency,
@@ -64,8 +66,8 @@ class JsonRepresentationMapping(Struct, frozen=True, omit_defaults=True):
         """Returns the requested value maps."""
         if is_multi:
             return MultiValueMap(
-                source=[src.to_model() for src in self.sourceValues],
-                target=self.targetValues,
+                source=tuple([src.to_model() for src in self.sourceValues]),
+                target=tuple(self.targetValues),
                 valid_from=(
                     self.__get_dt(self.validFrom) if self.validFrom else None
                 ),
@@ -135,13 +137,14 @@ class JsonRepresentationMap(MaintainableType, frozen=True, omit_defaults=True):
                 id=self.id,
                 name=self.name,
                 agency=self.agency,
-                source=s,
-                target=t,
-                maps=mrs,  # type: ignore[arg-type]
+                source=tuple(s),
+                target=tuple(t),
+                maps=tuple(mrs),  # type: ignore[arg-type]
                 description=self.description,
                 version=self.version,
                 is_final=is_final(self.version),
                 is_external_reference=self.isExternalReference,
+                structure_url=_self_link_href(self.links),
             )
         else:
             return RepresentationMap(
@@ -150,11 +153,12 @@ class JsonRepresentationMap(MaintainableType, frozen=True, omit_defaults=True):
                 agency=self.agency,
                 source=s[0] if s else None,
                 target=t[0] if s else None,
-                maps=mrs,  # type: ignore[arg-type]
+                maps=tuple(mrs),  # type: ignore[arg-type]
                 description=self.description,
                 version=self.version,
                 is_final=is_final(self.version),
                 is_external_reference=self.isExternalReference,
+                structure_url=_self_link_href(self.links),
             )
 
     @classmethod
@@ -190,6 +194,7 @@ class JsonRepresentationMap(MaintainableType, frozen=True, omit_defaults=True):
             name=rm.name,
             version=rm.version,
             isExternalReference=rm.is_external_reference,
+            links=_self_link(rm.structure_url),
             validFrom=ensure_tz_aware(rm.valid_from),
             validTo=ensure_tz_aware(rm.valid_to),
             description=rm.description,
@@ -250,7 +255,9 @@ class JsonComponentMap(Struct, frozen=True, omit_defaults=True):
             else:
                 rm = self.representationMap
             if mult:
-                return MultiComponentMap(self.source, self.target, rm)
+                return MultiComponentMap(
+                    tuple(self.source), tuple(self.target), rm
+                )
             else:
                 return ComponentMap(self.source[0], self.target[0], rm)
         else:
@@ -369,8 +376,9 @@ class JsonStructureMap(MaintainableType, frozen=True, omit_defaults=True):
             maps=m1 + m2 + m3,
             description=self.description,
             version=self.version,
-            annotations=[a.to_model() for a in self.annotations],
+            annotations=tuple([a.to_model() for a in self.annotations]),
             is_external_reference=self.isExternalReference,
+            structure_url=_self_link_href(self.links),
             is_final=is_final(self.version),
             valid_from=ensure_tz_aware(self.validFrom),
             valid_to=ensure_tz_aware(self.validTo),
@@ -396,6 +404,7 @@ class JsonStructureMap(MaintainableType, frozen=True, omit_defaults=True):
             name=sm.name,
             version=sm.version,
             isExternalReference=sm.is_external_reference,
+            links=_self_link(sm.structure_url),
             validFrom=ensure_tz_aware(sm.valid_from),
             validTo=ensure_tz_aware(sm.valid_to),
             description=sm.description,

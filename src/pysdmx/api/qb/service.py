@@ -42,6 +42,7 @@ class _CoreRestService:
         registry_format: RegistryFormat,
         pem: Optional[str] = None,
         timeout: Optional[float] = 5.0,
+        token: Optional[str] = None,
     ):
         """Instantiate a connector to a SDMX-REST service."""
         api_endpoint = api_endpoint.strip()
@@ -66,11 +67,18 @@ class _CoreRestService:
         self._headers = {
             "Accept-Encoding": "gzip, deflate",
         }
+        if token:
+            self._headers["Authorization"] = f"Bearer {token}"
         self._timeout = timeout
 
 
 class RestService(_CoreRestService):
     """Synchronous connector to SDMX-REST services.
+
+    The service is expected to be protocol-correct: a response is only
+    decoded as declared by its ``Content-Encoding`` header. Services that
+    are not can be queried using the
+    :class:`~pysdmx.api.qb.LenientRestService`.
 
     Args:
         api_endpoint: The entry point (URL) of the SDMX-REST service.
@@ -87,6 +95,8 @@ class RestService(_CoreRestService):
             list of trusted certicate authorities.
         timeout: The maximum number of seconds to wait before considering
             that a request timed out. Defaults to 5 seconds.
+        token: An optional bearer token to be sent as an ``Authorization``
+            header on every request, for services requiring authentication.
     """
 
     def __init__(
@@ -101,6 +111,7 @@ class RestService(_CoreRestService):
         registry_format: RegistryFormat = RegistryFormat.FUSION_JSON,
         pem: Optional[str] = None,
         timeout: Optional[float] = 5.0,
+        token: Optional[str] = None,
     ):
         """Instantiate a connector to a SDMX-REST service."""
         super().__init__(
@@ -114,13 +125,14 @@ class RestService(_CoreRestService):
             registry_format,
             pem,
             timeout,
+            token,
         )
 
     def data(self, query: DataQuery) -> bytes:
         """Execute a data query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._data_format.value
-        return self.__fetch(q, f)
+        return self._fetch(q, f)
 
     def stream_data(
         self, query: DataQuery, chunk_size: int = 8192
@@ -134,19 +146,19 @@ class RestService(_CoreRestService):
         """Execute a structure query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._structure_format.value
-        return self.__fetch(q, f)
+        return self._fetch(q, f)
 
     def schema(self, query: SchemaQuery) -> bytes:
         """Execute a schema query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._schema_format.value
-        return self.__fetch(q, f)
+        return self._fetch(q, f)
 
     def availability(self, query: AvailabilityQuery) -> bytes:
         """Execute an availability query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._avail_format.value
-        return self.__fetch(q, f)
+        return self._fetch(q, f)
 
     def reference_metadata(
         self,
@@ -159,7 +171,7 @@ class RestService(_CoreRestService):
         """Execute a reference metadata query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._refmeta_format.value
-        return self.__fetch(q, f)
+        return self._fetch(q, f)
 
     def registration(
         self,
@@ -172,9 +184,9 @@ class RestService(_CoreRestService):
         """Execute a registration query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._registry_format.value
-        return self.__fetch(q, f)
+        return self._fetch(q, f)
 
-    def __fetch(self, query: str, format: str) -> bytes:
+    def _fetch(self, query: str, format: str) -> bytes:
         with httpx.Client(
             verify=self._ssl_context, follow_redirects=True
         ) as client:
@@ -218,6 +230,11 @@ class RestService(_CoreRestService):
 class AsyncRestService(_CoreRestService):
     """Asynchronous connector to SDMX-REST services.
 
+    The service is expected to be protocol-correct: a response is only
+    decoded as declared by its ``Content-Encoding`` header. Services that
+    are not can be queried using the
+    :class:`~pysdmx.api.qb.AsyncLenientRestService`.
+
     Args:
         api_endpoint: The entry point (URL) of the SDMX-REST service.
         api_version: The most recent version of the SDMX-REST specification
@@ -233,6 +250,8 @@ class AsyncRestService(_CoreRestService):
             list of trusted certicate authorities.
         timeout: The maximum number of seconds to wait before considering
             that a request timed out. Defaults to 5 seconds.
+        token: An optional bearer token to be sent as an ``Authorization``
+            header on every request, for services requiring authentication.
     """
 
     def __init__(
@@ -247,6 +266,7 @@ class AsyncRestService(_CoreRestService):
         registry_format: RegistryFormat = RegistryFormat.FUSION_JSON,
         pem: Optional[str] = None,
         timeout: Optional[float] = 5.0,
+        token: Optional[str] = None,
     ):
         """Instantiate a connector to a SDMX-REST service."""
         super().__init__(
@@ -260,13 +280,14 @@ class AsyncRestService(_CoreRestService):
             registry_format,
             pem,
             timeout,
+            token,
         )
 
     async def data(self, query: DataQuery) -> bytes:
         """Execute a data query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._data_format.value
-        out = await self.__fetch(q, f)
+        out = await self._fetch(q, f)
         return out
 
     async def stream_data(
@@ -282,21 +303,21 @@ class AsyncRestService(_CoreRestService):
         """Execute a structure query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._structure_format.value
-        out = await self.__fetch(q, f)
+        out = await self._fetch(q, f)
         return out
 
     async def schema(self, query: SchemaQuery) -> bytes:
         """Execute a schema query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._schema_format.value
-        out = await self.__fetch(q, f)
+        out = await self._fetch(q, f)
         return out
 
     async def availability(self, query: AvailabilityQuery) -> bytes:
         """Execute an availability query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._avail_format.value
-        out = await self.__fetch(q, f)
+        out = await self._fetch(q, f)
         return out
 
     async def reference_metadata(
@@ -310,7 +331,7 @@ class AsyncRestService(_CoreRestService):
         """Execute a reference metadata query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._refmeta_format.value
-        out = await self.__fetch(q, f)
+        out = await self._fetch(q, f)
         return out
 
     async def registration(
@@ -324,10 +345,10 @@ class AsyncRestService(_CoreRestService):
         """Execute a registration query against the service."""
         q = query.get_url(self._api_version, True)
         f = self._registry_format.value
-        out = await self.__fetch(q, f)
+        out = await self._fetch(q, f)
         return out
 
-    async def __fetch(self, query: str, format: str) -> bytes:
+    async def _fetch(self, query: str, format: str) -> bytes:
         async with httpx.AsyncClient(
             verify=self._ssl_context, follow_redirects=True
         ) as client:
